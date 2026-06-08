@@ -136,7 +136,7 @@ export function StreamPlayer({
         const hevcCodecTest = v0 && typeof v0.canPlayType === 'function'
           ? v0.canPlayType('video/mp4; codecs="hvc1"')
           : '';
-        if (v0 && (hevcCodecTest === '' || hevcCodecTest === 'no')) {
+        if (v0 && !hevcCodecTest) {
           // Chromium/Firefox with no native HEVC. Show the fallback UI
           // immediately rather than waiting for the dashjs failure chain.
           console.log('[StreamPlayer] No native HEVC support — showing external-player fallback');
@@ -251,10 +251,10 @@ export function StreamPlayer({
         };
         player.on('play', onPlaying);
         // Also wire to the video element directly for broader coverage.
-        const v = videoRef.current;
-        if (v) v.addEventListener('playing', onPlaying, { once: true });
+        const v2 = videoRef.current;
+        if (v2) v2.addEventListener('playing', onPlaying, { once: true });
         dashRef.current = player;
-        onReady?.(v);
+        if (v2) onReady?.(v2);
       } catch (e: any) {
         console.error('[StreamPlayer] dashjs init failed', e);
         onError?.(e?.message || 'DASH init failed');

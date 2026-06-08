@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.tsbuildinfo
+next-env.d.ts
+
+# Large binary files
+*.apk
+*.ipa
+
+# Screenshots (test artifacts)
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Internal tools
+.playwright-mcp/
+.wrangler/
+.remember/
+.claude/
+
+# Vercel
+.vercel/
+
+# Logs
+*.log
+npm-debug.log*

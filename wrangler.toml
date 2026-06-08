@@ -1,0 +1,17 @@
+name = "moviebox-worker"
+main = "moviebox-worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# KV bindings — created via `wrangler kv namespace create`.
+# To create preview namespaces, run with --preview and paste the returned id's.
+[[kv_namespaces]]
+binding = "CACHE"
+id = "c17135b35ccc4620a959baa255f4f529"
+
+[[kv_namespaces]]
+binding = "WORKER_STATE"
+id = "80d81a2227af4261afe970c4cb542c78"
+
+[observability]
+enabled = true

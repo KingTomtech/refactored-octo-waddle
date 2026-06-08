@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Vidstack player styles (imported statically to keep TS happy) */
+@import '@vidstack/react/player/styles/default/theme.css';
+@import '@vidstack/react/player/styles/default/layouts/video.css';
+
+:root {
+  --bg-primary: #070710;
+  --bg-secondary: #0f0f1a;
+  --bg-tertiary: #161625;
+  --accent: #e50914;
+  --accent-hover: #f40612;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0b0;
+  --text-muted: #606070;
+  --border: rgba(255,255,255,0.08);
+  --rating-good: #21d07a;
+  --rating-mid: #d2a53a;
+  --rating-bad: #e7534a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-dm-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* Hide scrollbar on horizontal row but keep functionality */
+.scroll-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-row::-webkit-scrollbar { display: none; }
+.scroll-row > * { scroll-snap-align: start; }
+
+/* Vidstack theme override */
+.media-player {
+  --media-brand: var(--accent);
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-md transition-colors;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-md transition-colors backdrop-blur;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-text-secondary hover:text-white transition-colors;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-sm transition-colors;
+  }
+  .chip-active {
+    @apply bg-accent text-white hover:bg-accent;
+  }
+  .skeleton {
+    @apply bg-gradient-to-r from-bg-secondary via-bg-tertiary to-bg-secondary bg-[length:200%_100%] animate-[shimmer_1.5s_infinite];
+  }
+  .card-hover {
+    @apply transition-all duration-300 hover:scale-[1.04] hover:z-10 hover:shadow-2xl hover:shadow-black/50;
+  }
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Hide Vidstack focus ring issues on dark */
+.media-player [data-controls] { background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }

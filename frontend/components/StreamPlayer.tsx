@@ -115,144 +115,122 @@ export function StreamPlayer({
     let cancelled = false;
 
     if (isDash) {
-      if (!dashjsReady) return; // will retry when ready
+      if (!dashjsReady) return;
+
       const dashjs = (window as any).dashjs;
       if (!dashjs) {
         onError?.('DASH player not loaded');
         return;
       }
+
+      // Detect native HEVC support. Safari/macOS and Edge/Windows (with
+      // HEVC extension) support it natively. Chrome/Firefox do not and
+      // need the hevc.js WASM transcoder plugin.
+      const v0 = videoRef.current;
+      const nativeHevc = v0 && typeof v0.canPlayType === 'function'
+        ? !!v0.canPlayType('video/mp4; codecs="hvc1"')
+        : false;
+
+      // On non-native-HEVC browsers, we MUST wait for the hevc.js plugin
+      // before initializing dash.js — otherwise dash.js will reject the
+      // HEVC codec and produce audio-only playback. If hevc.js hasn't
+      // loaded yet, bail out and let the effect re-run when it's ready.
+      if (!nativeHevc && !hevcReady) {
+        console.log('[StreamPlayer] waiting for hevc.js plugin to load…');
+        return;
+      }
+
       try {
         const player = dashjs.MediaPlayer().create();
 
-        // Pre-flight: MPD codec probe. If every video Representation is
-        // HEVC (`hvc*`/`hev*`) and this Chromium build cannot decode HEVC
-        // natively, there is no point spinning up the dashjs player + the
-        // hevc.js WASM transcoder (the transcoder's init-segment handling
-        // is incompatible with dashjs 5.x's timestampOffset flush behavior,
-        // so the stream cannot play in-Chrome). Surface the external-player
-        // fallback UI up-front so the user is not stuck on a black surface.
-        // (Safari macOS will report native HEVC support and skip this path.)
-        const v0 = videoRef.current;
-        const hevcCodecTest = v0 && typeof v0.canPlayType === 'function'
-          ? v0.canPlayType('video/mp4; codecs="hvc1"')
-          : '';
-        if (v0 && !hevcCodecTest) {
-          // Chromium/Firefox with no native HEVC. Show the fallback UI
-          // immediately rather than waiting for the dashjs failure chain.
-          console.log('[StreamPlayer] No native HEVC support — showing external-player fallback');
-          onCodecUnsupported?.();
-          return;
-        }
-
-        // Universal safety-net watchdog: if the player never produces
-        // playable video tracks within 6s — whether the hevc.js plugin is
-        // attached, the manifest fails to parse, or any other failure mode
-        // — surface the external-player fallback so the user is not stuck
-        // looking at a black surface. The actual handler is wired below
-        // (it inspects `tracksAvailable()` and `hevcCleanupRef`).
-        if (hevcWatchdogRef.current) clearTimeout(hevcWatchdogRef.current);
-        hevcWatchdogRef.current = setTimeout(() => {
-          hevcWatchdogRef.current = null;
-          if (cancelled) return;
-          try {
-            const t = player.getTracksFor('video');
-            if (t && t.length > 0) return;
-          } catch { /* fall through */ }
-          console.warn('[StreamPlayer] dashjs produced no playable video tracks within 6s — falling back to external players');
-          onCodecUnsupported?.();
-        }, 6000);
-
-        // Async setup: attach hevc.js plugin BEFORE initialize. The plugin:
-        //  - is a no-op on Safari / browsers with native HEVC support
-        //  - on Chromium, registers a capabilities filter that lets the
-        //    HEVC Representations through, and installs an MSE interceptor
-        //    that transcodes each HEVC segment to H.264 in a Web Worker
-        //    using WebCodecs + our WASM decoder.
-        (async () => {
-          if (hevcReady) {
-            const plugin = (window as any).HevcDashjsPlugin;
-            if (plugin?.attachHevcSupport) {
-              console.log('[StreamPlayer] attaching hevc.js plugin…');
-              try {
-                // Force the MSE interceptor to install regardless of native
-                // HEVC detection — dashjs's CapabilitiesFilter removes HEVC
-                // Representations even when MediaSource.isTypeSupported returns
-                // true, so we must override the filter and route every segment
-                // through the WASM transcoder. On Safari the native decoder is
-                // used inside the worker; on Chromium we transcode to H.264.
-                const cleanup = await plugin.attachHevcSupport(player, {
-                  workerUrl: HEVC_WORKER_URL,
-                  wasmBinaryUrl: HEVC_WASM_URL,
-                  forceTranscode: true,
-                });
-                console.log('[StreamPlayer] hevc.js plugin attached');
-                hevcCleanupRef.current = cleanup;
-              } catch (err) {
-                console.warn('[StreamPlayer] hevc.js plugin init failed', err);
-              }
-            } else {
-              console.warn('[StreamPlayer] HevcDashjsPlugin global not found');
-            }
-          } else {
-            console.log('[StreamPlayer] hevc.js plugin script not yet ready');
-          }
-          if (cancelled) return;
-          player.initialize(v, src, autoPlay);
-        })();
-
-        player.on('error', (e: any) => {
-          if (cancelled) return;
-          const msg = e?.error?.message || e?.message || 'DASH playback error';
-          console.error('[dashjs] error', e);
-          onError?.(msg);
-        });
-        // After manifest parses, decide whether the stream is playable in this
-        // browser. Three paths:
-        //  1) hevc.js plugin attached AND we got tracks → leave player alive
-        //  2) plugin attached but no tracks after the watchdog window (the
-        //     plugin's MSE intercept could not feed the transcoder an init
-        //     segment — a known incompatibility with dashjs 5.x's
-        //     timestampOffset flush behavior) → fall back to the
-        //     external-player panel
-        //  3) plugin never attached (script missing, etc.) AND no tracks →
-        //     fall back to external-player panel
+        // Safety-net watchdog: if no playable video tracks appear within
+        // 10 seconds, fall back to the external-player panel.
         const tracksAvailable = () => {
           try {
             const t = player.getTracksFor('video');
             return t && t.length > 0;
           } catch { return false; }
         };
-        const armWatchdog = () => {
+
+        const armWatchdog = (reason: string) => {
           if (hevcWatchdogRef.current) clearTimeout(hevcWatchdogRef.current);
           hevcWatchdogRef.current = setTimeout(() => {
             hevcWatchdogRef.current = null;
             if (cancelled) return;
             if (tracksAvailable()) return;
-            console.warn('[StreamPlayer] no playable video tracks within 6s — falling back to external players');
+            const ve = videoRef.current;
+            if (ve && ve.readyState >= 2 && ve.currentTime > 0) return;
+            console.warn(`[StreamPlayer] ${reason} — no playable tracks in 10s, falling back to external players`);
             onCodecUnsupported?.();
-          }, 6000);
+          }, 10000);
         };
+
+        // Wire up events before async plugin attachment so we don't miss
+        // the manifestLoaded callback.
+        player.on('error', (e: any) => {
+          if (cancelled) return;
+          const msg = e?.error?.message || e?.message || 'DASH playback error';
+          console.error('[dashjs] error', e);
+          onError?.(msg);
+        });
+
         player.on('manifestLoaded', () => {
           if (cancelled) return;
           if (tracksAvailable()) {
-            console.log('[StreamPlayer] manifestLoaded with playable video tracks');
+            console.log('[StreamPlayer] manifestLoaded — playable video tracks available');
             return;
           }
           if (hevcCleanupRef.current) {
-            console.warn('[StreamPlayer] hevc.js attached but no tracks — waiting for transcoder to initialize');
-          } else {
-            console.warn('[StreamPlayer] No playable video tracks after manifest parse');
+            console.warn('[StreamPlayer] hevc.js attached but no tracks yet — waiting for transcoder');
+          } else if (!nativeHevc) {
+            console.warn('[StreamPlayer] No native HEVC and no hevc.js plugin — likely unsupported');
           }
-          armWatchdog();
+          armWatchdog('manifestLoaded but no tracks');
         });
-        // If real frames ever start flowing, cancel the watchdog.
+
+        // If real frames start flowing, cancel the watchdog.
         const onPlaying = () => {
-          if (hevcWatchdogRef.current) { clearTimeout(hevcWatchdogRef.current); hevcWatchdogRef.current = null; }
+          if (hevcWatchdogRef.current) {
+            clearTimeout(hevcWatchdogRef.current);
+            hevcWatchdogRef.current = null;
+          }
         };
         player.on('play', onPlaying);
-        // Also wire to the video element directly for broader coverage.
         const v2 = videoRef.current;
         if (v2) v2.addEventListener('playing', onPlaying, { once: true });
+
+        // Attach hevc.js WASM transcoder plugin on non-native-HEVC browsers
+        // BEFORE calling player.initialize(). The plugin registers a
+        // capabilities filter that lets HEVC Representations through dash.js's
+        // codec check, and installs an MSE interceptor that transcodes each
+        // HEVC segment to H.264 in a Web Worker using the WASM decoder.
+        (async () => {
+          if (!nativeHevc && hevcReady) {
+            const plugin = (window as any).HevcDashjsPlugin;
+            if (plugin?.attachHevcSupport) {
+              console.log('[StreamPlayer] attaching hevc.js WASM transcoder…');
+              try {
+                const cleanup = await plugin.attachHevcSupport(player, {
+                  workerUrl: HEVC_WORKER_URL,
+                  wasmBinaryUrl: HEVC_WASM_URL,
+                  forceTranscode: true,
+                });
+                console.log('[StreamPlayer] hevc.js plugin attached OK');
+                hevcCleanupRef.current = cleanup;
+              } catch (err) {
+                console.warn('[StreamPlayer] hevc.js plugin init failed — will try native dash.js as fallback', err);
+                armWatchdog('hevc.js plugin init failed');
+              }
+            } else {
+              console.warn('[StreamPlayer] HevcDashjsPlugin global not found');
+              armWatchdog('hevc.js plugin not available');
+            }
+          }
+          if (cancelled) return;
+          console.log(`[StreamPlayer] initializing dash.js (nativeHevc=${nativeHevc}, hevcPlugin=${!!hevcCleanupRef.current})`);
+          player.initialize(v, src, autoPlay);
+        })();
+
         dashRef.current = player;
         if (v2) onReady?.(v2);
       } catch (e: any) {
@@ -260,7 +238,7 @@ export function StreamPlayer({
         onError?.(e?.message || 'DASH init failed');
       }
     } else if (isHls) {
-      if (!hlsReady) return; // will retry when ready
+      if (!hlsReady) return;
       const Hls = (window as any).Hls;
       if (Hls && Hls.isSupported()) {
         const hls = new Hls({ enableWorker: true });

@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  MOVIEBOX CLOUDFLARE WORKER  — v3 (signed HMAC-MD5 + KV cache)
+ *  MOVIEBOX CLOUDFLARE WORKER  — v4 (signed HMAC-MD5 + KV cache + time-sync)
  *  Reverse-engineered from:
  *    - moviebox-api Python lib v0.5.4 (github.com/Simatwa/moviebox-api)
  *    - Android APK com.community.mbox.in v3.0.08.0911.03
@@ -17,6 +17,8 @@
  *  Routes exposed (all prefixed with /api):
  *  ┌──────────────────────────────────────────────────────────────┐
  *  │ GET /api/search       ?q=&type=movies|tv_series&page=&perPage=
+ *  │ POST /api/search/v2   {keyword, page, perPage, subjectType}
+ *  │ GET /api/search-rank  ?keyword=&perPage=
  *  │ GET /api/details      ?id=<subjectId>
  *  │ GET /api/trending     ?tabId=All|Movie|TV&page=
  *  │ GET /api/homepage     ?tabId=0&page=1
@@ -34,6 +36,7 @@
  *    - X-Client-Token: "<ts>,<md5(reverse(ts))>"
  *    - x-tr-signature: "<ts>|2|<base64(hmac-md5(canonical, key))>"
  *    - Bearer token from /search-suggest's x-user header (cached in KV)
+ *    - Time-sync: auto-corrects clock drift on GW.4410 errors
  * ============================================================
  */
 
@@ -90,6 +93,7 @@ const HOST_POOL = [
   "https://api4.aoneroom.com",
   "https://api4sg.aoneroom.com",
   "https://api3.aoneroom.com",
+  "https://api6sg.aoneroom.com",
   "https://api.inmoviebox.com",
 ];
 
@@ -126,10 +130,10 @@ function md5HexString(str) {
 
 function reverseString(s) { return s.split("").reverse().join(""); }
 
-function xClientToken(tsMs) {
+async function xClientToken(tsMs) {
   const s = String(tsMs);
-  // md5 is async, so we return a function that builds the token
-  return md5HexString(reverseString(s)).then(h => `${s},${h}`);
+  const h = await md5HexString(reverseString(s));
+  return `${s},${h}`;
 }
 
 function sortedQueryString(url) {
@@ -163,6 +167,8 @@ async function xTrSignature(method, accept, ctype, url, body, tsMs, useAlt = fal
   ].join("\n");
 
   const secret = b64Decode(secretKey(useAlt, env));
+  // Protocol version |2| is always present regardless of algorithm.
+  // The APK supports MD5/SHA1/SHA256, but the live API accepts MD5.
   const key = await crypto.subtle.importKey(
     "raw",
     secret,
@@ -176,7 +182,7 @@ async function xTrSignature(method, accept, ctype, url, body, tsMs, useAlt = fal
 
 async function buildSignedHeaders(method, url, opts = {}) {
   const { body = null, accept = "application/json", contentType = "application/json", authToken = null, env = null } = opts;
-  const ts = Date.now();
+  const ts = Date.now() + state.timeOffset;
   const xct = await xClientToken(ts);
   const sig = await xTrSignature(method, accept, contentType, url, body, ts, false, env);
   const headers = {
@@ -205,6 +211,10 @@ const state = {
   activeBase: HOST_POOL[0],
   runtimeToken: null,
   runtimeTokenTs: 0,
+  // Time-sync offset (ms) — when the server returns GW.4410, it includes
+  // its timestamp. We store serverTs - localTs and add it to all future
+  // request timestamps so signatures remain valid despite clock drift.
+  timeOffset: 0,
 };
 
 const TTL = {
@@ -332,7 +342,7 @@ async function refreshAuthToken(env) {
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":   "*",
-  "Access-Control-Allow-Methods":  "GET, OPTIONS",
+  "Access-Control-Allow-Methods":  "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers":  "Content-Type, Authorization",
   "Access-Control-Expose-Headers": "X-Response-Source, Retry-After",
 };
@@ -417,7 +427,7 @@ async function signedRequest(path, init = {}) {
 
       if (r.status === 407) {
         // Signature invalid — try with the alt key, using a *single* fresh timestamp
-        const altTs = Date.now();
+        const altTs = Date.now() + state.timeOffset;
         const altXct = await xClientToken(altTs);
         const altSig = await xTrSignature(method, accept, ctype, url, body, altTs, true, init.env);
         const altHeaders = {
@@ -438,6 +448,47 @@ async function signedRequest(path, init = {}) {
         }
         errors.push({ backend: base, status: 407 });
         continue;
+      }
+
+      // Time-sync: if server returns GW.4410 (clock drift), store the
+      // offset and retry with corrected timestamps.
+      if (r.ok) {
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch { data = null; }
+        if (data && (data.code === 4410 || data.code === "GW.4410")) {
+          const serverTs = parseInt(data?.data?.timestamp || data?.data?.serverTimestamp || "0", 10);
+          if (serverTs > 0) {
+            state.timeOffset = serverTs - Date.now();
+            console.log(`[worker] time-sync: offset=${state.timeOffset}ms (server=${serverTs})`);
+          }
+          // Retry with corrected timestamp
+          const retryTs = Date.now() + state.timeOffset;
+          const retryXct = await xClientToken(retryTs);
+          const retrySig = await xTrSignature(method, accept, ctype, url, body, retryTs, false, init.env);
+          const retryHeaders = {
+            "User-Agent":      USER_AGENT,
+            "Accept":          accept,
+            "Content-Type":    ctype,
+            "Connection":      "keep-alive",
+            "X-Client-Token":  retryXct,
+            "x-tr-signature":  retrySig,
+            "X-Client-Info":   CLIENT_INFO,
+            "X-Client-Status": "0",
+          };
+          if (token) retryHeaders["Authorization"] = `Bearer ${token}`;
+          const r3 = await fetch(url, { ...fetchInit, headers: retryHeaders });
+          if (!RETRY_STATUS_CODES.has(r3.status)) {
+            state.activeBase = base;
+            return { ok: r3.ok, status: r3.status, body: await r3.text(), backend: base };
+          }
+          // Retry also failed — fall through to next host
+          errors.push({ backend: base, status: r3.status });
+          continue;
+        }
+        // Normal 200 response
+        state.activeBase = base;
+        return { ok: true, status: 200, body: text, backend: base };
       }
       if (RETRY_STATUS_CODES.has(r.status)) {
         errors.push({ backend: base, status: r.status });
@@ -513,6 +564,61 @@ async function handleSearch(url, env) {
   };
   await cachePut(env, cacheKey, payload, TTL.search);
   return json(payload, { source: "origin", cacheControl: "public, max-age=60" });
+}
+
+async function handleSearchV2(url, env) {
+  const q        = url.searchParams.get("q") || "";
+  const typeRaw  = url.searchParams.get("type") || "all";
+  const page     = parseInt(url.searchParams.get("page") || "1", 10);
+  const perPage  = Math.min(20, parseInt(url.searchParams.get("perPage") || "20", 10));
+
+  if (!q.trim()) return err(400, "missing_query", "q parameter required");
+
+  const TYPE_MAP = { all: 0, movies: 1, tv_series: 2, education: 5, music: 6, anime: 7, other: 8 };
+  const subjectType = TYPE_MAP[String(typeRaw).toLowerCase()] ?? 0;
+
+  const cacheKey = `searchV2:${q}:${typeRaw}:${page}:${perPage}`;
+  const cached = await cacheGet(env, cacheKey);
+  if (cached) return json(cached.value, { source: cached.source });
+
+  const path = "/wefeed-mobile-bff/subject-api/search/v2";
+  const body = JSON.stringify({ keyword: q, page, perPage, subjectType });
+
+  const r = await withDedup(`searchV2:${q}:${typeRaw}:${page}:${perPage}`, () =>
+    signedRequest(path, { method: "POST", body, env, timeoutMs: 10000 })
+  );
+
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded", { attempts: r.errors });
+  if (r.status === 429) return err(429, "upstream_rate_limited", "Origin returned 429", { backend: r.backend });
+
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const items = data?.data?.items || data?.items || [];
+  const pager = data?.data?.pager || data?.pager || null;
+
+  const payload = { ok: true, data: items, pager, backend: r.backend };
+  await cachePut(env, cacheKey, payload, TTL.search);
+  return json(payload, { source: "origin", cacheControl: "public, max-age=60" });
+}
+
+async function handleSearchRank(url, env) {
+  const keyword = url.searchParams.get("keyword") || "";
+  const perPage = parseInt(url.searchParams.get("perPage") || "10", 10);
+
+  const cacheKey = `searchRank:${keyword}:${perPage}`;
+  const cached = await cacheGet(env, cacheKey);
+  if (cached) return json(cached.value, { source: cached.source });
+
+  const path = `/wefeed-mobile-bff/subject-api/search-rank/v2?keyword=${encodeURIComponent(keyword)}&perPage=${perPage}`;
+  const r = await withDedup(`searchRank:${keyword}:${perPage}`, () => signedRequest(path, { method: "GET", env }));
+
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded", { attempts: r.errors });
+
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const payload = { ok: true, data: data?.data || data, backend: r.backend };
+  await cachePut(env, cacheKey, payload, TTL.search);
+  return json(payload, { source: "origin", cacheControl: "public, max-age=300" });
 }
 
 async function handleDetails(url, env) {
@@ -1035,17 +1141,18 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return err(405, "method_not_allowed", "Only GET / HEAD supported");
+    if (request.method !== "GET" && request.method !== "HEAD" && request.method !== "POST") {
+      return err(405, "method_not_allowed", "Only GET / HEAD / POST supported");
     }
 
     if (path === "/" || path === "/api") {
       return json({
         ok: true,
         name: "moviebox-worker",
-        version: "3.0.0",
+        version: "4.0.0",
         routes: [
-          "/api/search", "/api/details", "/api/play-info", "/api/season-info",
+          "/api/search", "/api/search/v2", "/api/search-rank",
+          "/api/details", "/api/play-info", "/api/season-info",
           "/api/stream", "/api/episode", "/api/proxy", "/api/subtitle", "/api/trending",
           "/api/homepage", "/api/popular", "/api/mirrors", "/api/health", "/api/probe",
         ],
@@ -1055,6 +1162,8 @@ export default {
     try {
       switch (path) {
         case "/api/search":      return await handleSearch(url, env);
+        case "/api/search/v2":   return await handleSearchV2(url, env);
+        case "/api/search-rank": return await handleSearchRank(url, env);
         case "/api/details":     return await handleDetails(url, env);
         case "/api/play-info":   return await handlePlayInfo(url, env);
         case "/api/season-info": return await handleSeasonInfo(url, env);

@@ -19,6 +19,11 @@ next-env.d.ts
 # Large binary files
 *.apk
 *.ipa
+*.zip
+
+# APK decompilation artifacts
+apk-decoded/
+base/
 
 # Screenshots (test artifacts)
 *.png

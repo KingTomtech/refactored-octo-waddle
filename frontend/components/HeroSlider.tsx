@@ -133,6 +133,7 @@ export function HeroSlider({ items, autoAdvanceMs = 6000 }: Props) {
           )}
           <div className="absolute inset-0 bg-hero-gradient" />
           <div className="absolute inset-0 bg-gradient-to-r from-bg-primary via-bg-primary/40 to-transparent" />
+          <div className="absolute inset-0 bg-vignette-red pointer-events-none" />
         </motion.div>
       </AnimatePresence>
 
@@ -148,9 +149,9 @@ export function HeroSlider({ items, autoAdvanceMs = 6000 }: Props) {
             className="max-w-2xl"
           >
             <p className="text-sm uppercase tracking-widest text-text-secondary mb-2">
-              {type === 'movie' ? 'Movie' : 'TV Series'}{year ? ` · ${year}` : ''}
+              {type === 'movie' ? 'Movie' : 'Series'}{year ? ` · ${year}` : ''}
             </p>
-            <h1 className="font-display text-5xl sm:text-7xl tracking-wide leading-none mb-3">
+            <h1 className="font-display text-5xl sm:text-7xl tracking-wide leading-none mb-3 text-shadow-red">
               {title}
             </h1>
             <div className="flex items-center gap-3 text-sm text-text-secondary mb-4">
@@ -194,20 +195,31 @@ export function HeroSlider({ items, autoAdvanceMs = 6000 }: Props) {
         </AnimatePresence>
       </div>
 
-      {/* Dots */}
+      {/* Progress bar + Dots */}
       {top.length > 1 && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
-          {top.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => jumpTo(i)}
-              aria-label={`Go to slide ${i + 1}`}
-              className={cn(
-                'h-1.5 rounded-full transition-all',
-                i === index % top.length ? 'w-8 bg-white' : 'w-1.5 bg-white/40 hover:bg-white/60',
-              )}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 z-10">
+          {/* Progress bar */}
+          <div className="w-64 h-0.5 bg-white/10 rounded-full overflow-hidden">
+            <div
+              key={index % top.length}
+              className="h-full bg-accent rounded-full animate-progress-fill"
+              style={{ '--slide-duration': `${autoAdvanceMs}ms` } as React.CSSProperties}
             />
-          ))}
+          </div>
+          {/* Dot indicators */}
+          <div className="flex items-center gap-2">
+            {top.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => jumpTo(i)}
+                aria-label={`Go to slide ${i + 1}`}
+                className={cn(
+                  'h-1.5 rounded-full transition-all',
+                  i === index % top.length ? 'w-8 bg-accent shadow-glow-red' : 'w-1.5 bg-white/30 hover:bg-accent/50',
+                )}
+              />
+            ))}
+          </div>
         </div>
       )}
 

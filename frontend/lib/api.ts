@@ -15,6 +15,33 @@ import type {
   WorkerProbeResponse,
   WorkerDetails,
   WorkerSeason,
+  WorkerRecommendResponse,
+  WorkerRecommendItem,
+  WorkerBottomTabResponse,
+  WorkerBottomTab,
+  WorkerHomeTab,
+  WorkerFilterResponse,
+  WorkerFilterItem,
+  WorkerListResponse,
+  WorkerDubInfoResponse,
+  WorkerDubTrack,
+  WorkerWantToSeeResponse,
+  WorkerStreamCaptionsResponse,
+  WorkerStreamCaption,
+  WorkerSearchRankResponse,
+  WorkerSearchRankItem,
+  WorkerResourceResponse,
+  WorkerShort,
+  WorkerShortsResponse,
+  WorkerShortInfo,
+  WorkerShortInfoResponse,
+  WorkerStaffInfoResponse,
+  WorkerStaffRelatedResponse,
+  WorkerWidgetResponse,
+  WorkerWidgetSection,
+  WorkerDailyRecResponse,
+  WorkerPlaylistContentResponse,
+  WorkerSearchSuggestResponse,
   Quality,
 } from './types';
 
@@ -257,6 +284,279 @@ function normaliseProbe(raw: any): WorkerProbeResponse {
   return { ok: !!raw.ok, results, testedAt: raw.testedAt ?? new Date().toISOString() };
 }
 
+// ── Normalisers for new endpoints ────────────────────────────
+
+function normaliseRecommend(raw: any): WorkerRecommendResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerRecommendItem[] = items.map((s: any) => ({
+    id: String(s.subjectId ?? s.id ?? ''),
+    title: s.title ?? s.name ?? 'Untitled',
+    poster: s.cover?.url ?? s.poster ?? undefined,
+    backdrop: s.stills?.url ?? s.backdrop?.url ?? undefined,
+    rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+    subjectType: s.subjectType,
+    releaseDate: s.releaseDate,
+  }));
+  return { ok: true, data: mapped, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseBottomTab(raw: any): WorkerBottomTabResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const bottomTabs: WorkerBottomTab[] = Array.isArray(d.bottomTabs)
+    ? d.bottomTabs.map((t: any) => ({
+        btTabType: t.btTabType ?? '',
+        name: t.name ?? t.text ?? '',
+        btTabCode: t.btTabCode ?? '',
+        icon: t.icon ?? undefined,
+        statusWhite: t.statusWhite ?? undefined,
+        url: t.url ?? undefined,
+        operateTabId: t.operateTabId ?? undefined,
+        displayType: t.displayType ?? undefined,
+        badge: t.badge ?? undefined,
+      }))
+    : [];
+  const homeTabs: WorkerHomeTab[] = Array.isArray(d.homeTabs)
+    ? d.homeTabs.map((t: any) => ({
+        name: t.name ?? '',
+        tabId: Number(t.tabId ?? t.operateTabId ?? 0),
+        type: t.type ?? '',
+        tabCode: t.tabCode ?? undefined,
+        url: t.url ?? undefined,
+        nameImage: t.nameImage ?? undefined,
+        selectNameImage: t.selectNameImage ?? undefined,
+        displayType: t.displayType ?? undefined,
+      }))
+    : [];
+  return { ok: true, data: { bottomTabs, homeTabs, version: d.version, badgeVer: d.badgeVer }, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseFilterItems(raw: any): WorkerFilterResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const typeList: any[] = Array.isArray(d?.typeList) ? d.typeList : Array.isArray(d) ? d : [];
+  const mapped: WorkerFilterItem[] = typeList.map((f: any) => ({
+    id: String(f.id ?? f.typeId ?? ''),
+    name: f.name ?? f.typeName ?? '',
+    type: f.type ?? undefined,
+    values: Array.isArray(f.values ?? f.items)
+      ? (f.values ?? f.items).map((v: any) => ({ id: String(v.id ?? v.value ?? ''), name: v.name ?? v.text ?? '' }))
+      : undefined,
+  }));
+  return { ok: true, data: mapped, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseList(raw: any): WorkerListResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerSearchResult[] = items.map((s: any) => ({
+    id: String(s.subjectId ?? s.id ?? ''),
+    title: s.title ?? s.name ?? 'Untitled',
+    year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+    type: mapSubjectTypeToContentType(s.subjectType),
+    poster: s.cover?.url ?? s.poster ?? undefined,
+    backdrop: s.stills?.url ?? s.backdrop?.url ?? undefined,
+    rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+    duration: s.duration,
+    description: s.description,
+  }));
+  return { ok: true, data: mapped, pager: raw?.pager, source: raw?.source };
+}
+
+function normaliseDubInfo(raw: any): WorkerDubInfoResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const tracks: WorkerDubTrack[] = Array.isArray(d?.dubs ?? d?.audioTracks)
+    ? (d.dubs ?? d.audioTracks).map((t: any) => ({
+        name: t.name ?? t.languageName ?? '',
+        languageCode: t.languageCode ?? t.lang ?? undefined,
+        url: t.url ?? undefined,
+      }))
+    : [];
+  return { ok: true, data: tracks, source: raw?.source };
+}
+
+function normaliseStreamCaptions(raw: any): WorkerStreamCaptionsResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerStreamCaption[] = items.map((c: any) => ({
+    url: c.url ?? '',
+    // Per APK spec, captions use `lan` (BCP-47) and `lanName` (display)
+    lang: c.lan ?? c.languageCode ?? c.lang ?? 'en',
+    format: c.format ?? (c.url?.split('.').pop() ?? 'srt'),
+    label: c.lanName ?? c.languageName ?? c.label ?? undefined,
+  }));
+  return { ok: true, data: mapped, source: raw?.source };
+}
+
+function normaliseSearchRank(raw: any): WorkerSearchRankResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerSearchRankItem[] = items.map((k: any) => ({
+    keyword: k.keyword ?? k.key ?? k.searchKeyword ?? String(k),
+    hot: k.hot ?? k.heat ?? k.score ?? undefined,
+  }));
+  return { ok: true, data: mapped, source: raw?.source };
+}
+
+// ── v5 normalisers (APK-mapped endpoints) ────────────────────
+
+function normaliseSearchSuggest(raw: any): WorkerSearchSuggestResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped = items.map((g: any) => ({
+    keyword: g.keyword ?? g.title ?? '',
+    subjects: Array.isArray(g.subjects) ? g.subjects.map((s: any) => ({
+      id: String(s.subjectId ?? s.id ?? ''),
+      title: s.title ?? s.name ?? 'Untitled',
+      year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+      type: mapSubjectTypeToContentType(s.subjectType),
+      poster: s.cover?.url ?? s.poster ?? undefined,
+      rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+    })) : undefined,
+  }));
+  return { ok: true, data: mapped, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseShorts(raw: any): WorkerShortsResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerShort[] = items.map((s: any) => ({
+    id: String(s.subjectId ?? s.id ?? s.shortId ?? ''),
+    title: s.title ?? s.name ?? 'Untitled',
+    poster: s.cover?.url ?? s.poster ?? undefined,
+    backdrop: s.stills?.url ?? s.backdrop?.url ?? undefined,
+    description: s.description ?? undefined,
+    duration: s.duration ? Number(s.duration) : undefined,
+    videoUrl: s.videoUrl ?? s.video?.url ?? undefined,
+    likes: s.likes ? Number(s.likes) : undefined,
+    plays: s.plays ? Number(s.plays) : undefined,
+    subjectType: s.subjectType,
+    releaseDate: s.releaseDate,
+  }));
+  return { ok: true, data: mapped, pager: raw?.pager, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseShortInfo(raw: any): WorkerShortInfoResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const out: WorkerShortInfo = {
+    id: String(d.subjectId ?? d.id ?? ''),
+    title: d.title ?? d.name ?? 'Untitled',
+    description: d.description ?? undefined,
+    poster: d.cover?.url ?? undefined,
+    backdrop: d.stills?.url ?? undefined,
+    videoUrl: d.videoUrl ?? d.video?.url ?? undefined,
+    duration: d.duration ? Number(d.duration) : undefined,
+    plays: d.plays ? Number(d.plays) : undefined,
+    likes: d.likes ? Number(d.likes) : undefined,
+    authorId: d.authorId ?? undefined,
+    authorName: d.authorName ?? undefined,
+  };
+  return { ok: true, data: out, source: raw?.source };
+}
+
+function normaliseStaffInfo(raw: any): WorkerStaffInfoResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const filmography: WorkerSearchResult[] = Array.isArray(d.filmography)
+    ? d.filmography.map((s: any) => ({
+        id: String(s.subjectId ?? s.id ?? ''),
+        title: s.title ?? s.name ?? 'Untitled',
+        year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+        type: mapSubjectTypeToContentType(s.subjectType),
+        poster: s.cover?.url ?? s.poster ?? undefined,
+        rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+      }))
+    : [];
+  return {
+    ok: true,
+    data: {
+      id: String(d.staffId ?? d.id ?? ''),
+      name: d.name ?? d.staffName ?? 'Unknown',
+      avatarUrl: d.avatarUrl ?? d.avatar ?? undefined,
+      bio: d.bio ?? d.description ?? undefined,
+      dob: d.birthday ?? d.dob ?? undefined,
+      birthplace: d.birthplace ?? undefined,
+      filmography,
+    },
+    source: raw?.source,
+  };
+}
+
+function normaliseStaffRelated(raw: any): WorkerStaffRelatedResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const related: WorkerSearchResult[] = Array.isArray(d.related ?? d.items ?? d.data)
+    ? (d.related ?? d.items ?? d.data).map((s: any) => ({
+        id: String(s.subjectId ?? s.id ?? ''),
+        title: s.title ?? s.name ?? 'Untitled',
+        year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+        type: mapSubjectTypeToContentType(s.subjectType),
+        poster: s.cover?.url ?? s.poster ?? undefined,
+        rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+      }))
+    : [];
+  return { ok: true, data: { staffId: String(d.staffId ?? d.id ?? ''), related }, source: raw?.source };
+}
+
+function normaliseWidget(raw: any): WorkerWidgetResponse {
+  if (!raw || raw.ok === false) return raw;
+  const sections: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerWidgetSection[] = sections.map((s: any) => ({
+    type: s.type ?? s.sectionType ?? 'unknown',
+    title: s.title ?? s.name ?? undefined,
+    items: Array.isArray(s.items ?? s.subjects)
+      ? (s.items ?? s.subjects).map((it: any) => ({
+          id: String(it.subjectId ?? it.id ?? ''),
+          title: it.title ?? it.name ?? 'Untitled',
+          year: it.releaseDate ? Number(String(it.releaseDate).slice(0, 4)) : undefined,
+          type: mapSubjectTypeToContentType(it.subjectType),
+          poster: it.cover?.url ?? it.poster ?? undefined,
+          rating: it.imdbRatingValue ? Number(it.imdbRatingValue) : undefined,
+        }))
+      : undefined,
+  }));
+  return { ok: true, data: mapped, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normaliseDailyRec(raw: any): WorkerDailyRecResponse {
+  if (!raw || raw.ok === false) return raw;
+  const items: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  const mapped: WorkerSearchResult[] = items.map((s: any) => ({
+    id: String(s.subjectId ?? s.id ?? ''),
+    title: s.title ?? s.name ?? 'Untitled',
+    year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+    type: mapSubjectTypeToContentType(s.subjectType),
+    poster: s.cover?.url ?? s.poster ?? undefined,
+    backdrop: s.stills?.url ?? undefined,
+    rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+    description: s.description,
+  }));
+  return { ok: true, data: mapped, source: raw?.source, degraded: raw?.degraded };
+}
+
+function normalisePlaylistContent(raw: any): WorkerPlaylistContentResponse {
+  if (!raw || raw.ok === false) return raw;
+  const d = raw?.data ?? {};
+  const items: WorkerSearchResult[] = Array.isArray(d.items ?? d.subjects)
+    ? (d.items ?? d.subjects).map((s: any) => ({
+        id: String(s.subjectId ?? s.id ?? ''),
+        title: s.title ?? s.name ?? 'Untitled',
+        year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : undefined,
+        type: mapSubjectTypeToContentType(s.subjectType),
+        poster: s.cover?.url ?? s.poster ?? undefined,
+        rating: s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined,
+      }))
+    : [];
+  return {
+    ok: true,
+    data: { playlistId: String(d.playlistId ?? d.id ?? ''), title: d.title, description: d.description, items },
+    source: raw?.source,
+  };
+}
+
 // ── Public API ──────────────────────────────────────────────
 
 export const api = {
@@ -310,6 +610,178 @@ export const api = {
   health: async (signal?: AbortSignal): Promise<WorkerHealth> => {
     const raw = await workerFetch<any>('/api/health', {}, signal ? { signal } : undefined);
     return normaliseHealth(raw);
+  },
+
+  // ── New endpoints (from APK audit) ────────────────────────────
+
+  /** Recommendations shown on detail pages ("You may also like") */
+  detailRec: async (id: string, signal?: AbortSignal): Promise<WorkerRecommendResponse> => {
+    const raw = await workerFetch<any>('/api/detail-rec', { id }, signal ? { signal } : undefined);
+    return normaliseRecommend(raw);
+  },
+
+  /** Top/trending recommendations for homepage */
+  topRec: async (signal?: AbortSignal): Promise<WorkerRecommendResponse> => {
+    const raw = await workerFetch<any>('/api/top-rec', {}, signal ? { signal } : undefined);
+    return normaliseRecommend(raw);
+  },
+
+  /** Bottom tab + home tab configuration from the backend */
+  bottomTab: async (host = '0', signal?: AbortSignal): Promise<WorkerBottomTabResponse> => {
+    const raw = await workerFetch<any>('/api/bottom-tab', { host }, signal ? { signal } : undefined);
+    return normaliseBottomTab(raw);
+  },
+
+  /** Play-related recommendations (shown during/after playback) */
+  playRelatedRec: async (id: string, signal?: AbortSignal): Promise<WorkerRecommendResponse> => {
+    const raw = await workerFetch<any>('/api/play-related-rec', { id }, signal ? { signal } : undefined);
+    return normaliseRecommend(raw);
+  },
+
+  /** Mark a title as "want to see" (watchlist on server) */
+  wantToSee: async (id: string, signal?: AbortSignal): Promise<WorkerWantToSeeResponse> => {
+    const res = await fetch(`${WORKER_BASE.replace(/\/$/, '')}/api/want-to-see?id=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ subjectId: id }),
+      signal: signal ?? undefined,
+    });
+    if (!res.ok) throw new Error(`want-to-see → ${res.status}`);
+    return res.json();
+  },
+
+  /** Mark a title as "have seen" (watched on server) */
+  haveSeen: async (id: string, signal?: AbortSignal): Promise<WorkerWantToSeeResponse> => {
+    const res = await fetch(`${WORKER_BASE.replace(/\/$/, '')}/api/have-seen?id=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ subjectId: id }),
+      signal: signal ?? undefined,
+    });
+    if (!res.ok) throw new Error(`have-seen → ${res.status}`);
+    return res.json();
+  },
+
+  /** Dub/audio track info for a title */
+  dubInfo: async (id: string, signal?: AbortSignal): Promise<WorkerDubInfoResponse> => {
+    const raw = await workerFetch<any>('/api/dub-info', { id }, signal ? { signal } : undefined);
+    return normaliseDubInfo(raw);
+  },
+
+  /** Filter items for browse page (genres, years, countries) */
+  filterItems: async (tabId = '0', page = 1, pageSize = 20, signal?: AbortSignal): Promise<WorkerFilterResponse> => {
+    const raw = await workerFetch<any>('/api/filter-items', { tabId, page, pageSize }, signal ? { signal } : undefined);
+    return normaliseFilterItems(raw);
+  },
+
+  /** Paginated content list (browse/filter results) */
+  list: async (listId = '0', page = 1, pageSize = 20, signal?: AbortSignal): Promise<WorkerListResponse> => {
+    const raw = await workerFetch<any>('/api/list', { id: listId, page, pageSize }, signal ? { signal } : undefined);
+    return normaliseList(raw);
+  },
+
+  /** Stream captions (richer subtitle source) */
+  streamCaptions: async (id: string, streamId?: string, signal?: AbortSignal): Promise<WorkerStreamCaptionsResponse> => {
+    const params: Record<string, string | number> = { id };
+    if (streamId) params.streamId = streamId;
+    const raw = await workerFetch<any>('/api/stream-captions', params, signal ? { signal } : undefined);
+    return normaliseStreamCaptions(raw);
+  },
+
+  /** Hot search keywords for search suggestions */
+  searchRank: async (keyword = '', perPage = 10, signal?: AbortSignal): Promise<WorkerSearchRankResponse> => {
+    const raw = await workerFetch<any>('/api/search-rank', { keyword, perPage }, signal ? { signal } : undefined);
+    return normaliseSearchRank(raw);
+  },
+
+  /** Download resource list for a title (v5) */
+  resourceList: async (id: string, signal?: AbortSignal): Promise<WorkerResourceResponse> => {
+    const raw = await workerFetch<any>('/api/resource', { id }, signal ? { signal } : undefined);
+    const d = raw?.data ?? {};
+    // Upstream returns DownloadListBean: { resourceList: [{ resourceId, resolution, format, size, episode, season, shareUrl, ... }] }
+    const list: any[] = Array.isArray(d?.resourceList) ? d.resourceList
+      : Array.isArray(d?.resources) ? d.resources
+      : Array.isArray(raw?.data) ? raw.data
+      : [];
+    const mapped = list.map((r: any) => ({
+      resourceId: String(r.resourceId ?? r.id ?? ''),
+      resolution: r.resolution ? Number(r.resolution) : undefined,
+      format: r.format ?? undefined,
+      size: r.size ? Number(r.size) : undefined,
+      url: r.shareUrl ?? r.url ?? undefined,
+      episode: r.episode ? Number(r.episode) : undefined,
+      season: r.season ? Number(r.season) : undefined,
+    }));
+    return { ok: !!raw?.ok, data: mapped, source: raw?.source };
+  },
+
+  // ── v5 APK-mapped endpoints ───────────────────────────────────
+
+  /** Auto-suggest as the user types in the search bar */
+  searchSuggest: async (keyword: string, perPage = 10, resultMode = '', signal?: AbortSignal): Promise<WorkerSearchSuggestResponse> => {
+    const raw = await workerFetch<any>('/api/search-suggest',
+      { keyword, perPage, resultMode },
+      signal ? { signal } : undefined);
+    return normaliseSearchSuggest(raw);
+  },
+
+  /** Trending short-form (vertical) videos */
+  shortsMostTrending: async (page = 1, perPage = 20, signal?: AbortSignal): Promise<WorkerShortsResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/most-trending', { page, perPage }, signal ? { signal } : undefined);
+    return normaliseShorts(raw);
+  },
+
+  /** User's favorite shorts (server-stored) */
+  shortsFavoriteList: async (page = 1, perPage = 20, signal?: AbortSignal): Promise<WorkerShortsResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/favorite-list', { page, perPage }, signal ? { signal } : undefined);
+    return normaliseShorts(raw);
+  },
+
+  /** Single short's metadata (for the /shorts/[id] page) */
+  shortsGetInfo: async (id: string, signal?: AbortSignal): Promise<WorkerShortInfoResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/get-info', { id }, signal ? { signal } : undefined);
+    return normaliseShortInfo(raw);
+  },
+
+  /** Episode rail for a short subject (anime/short-tv series) */
+  shortsMiniList: async (id: string, startPosition = 0, endPosition = 20, signal?: AbortSignal): Promise<WorkerShortsResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/mini-list', { id, startPosition, endPosition }, signal ? { signal } : undefined);
+    return normaliseShorts(raw);
+  },
+
+  /** Cast/crew member's profile + filmography */
+  staffInfo: async (id: string, signal?: AbortSignal): Promise<WorkerStaffInfoResponse> => {
+    const raw = await workerFetch<any>('/api/staff-info', { id }, signal ? { signal } : undefined);
+    return normaliseStaffInfo(raw);
+  },
+
+  /** Cast/crew related subjects (per genre etc.) */
+  staffRelated: async (id: string, signal?: AbortSignal): Promise<WorkerStaffRelatedResponse> => {
+    const raw = await workerFetch<any>('/api/staff-related', { id }, signal ? { signal } : undefined);
+    return normaliseStaffRelated(raw);
+  },
+
+  /** Server's "pick of the day" — shown above the fold on the homepage */
+  dailyMovieRec: async (signal?: AbortSignal): Promise<WorkerDailyRecResponse> => {
+    const raw = await workerFetch<any>('/api/daily-movie-rec', {}, signal ? { signal } : undefined);
+    return normaliseDailyRec(raw);
+  },
+
+  /** Home-screen widget payload (continue watching, hot list, etc.) */
+  widget: async (signal?: AbortSignal): Promise<WorkerWidgetResponse> => {
+    const raw = await workerFetch<any>('/api/widget', {}, signal ? { signal } : undefined);
+    return normaliseWidget(raw);
+  },
+
+  /** Curated playlist of subjects */
+  playlistContent: async (playlistId: string, signal?: AbortSignal): Promise<WorkerPlaylistContentResponse> => {
+    const raw = await workerFetch<any>('/api/playlist/content', { id: playlistId }, signal ? { signal } : undefined);
+    return normalisePlaylistContent(raw);
+  },
+
+  /** Trending feed v2 — multi-tab (Trending / Movie / TV / etc.) */
+  trendingV2: async (tabId = '0', page = 1, signal?: AbortSignal): Promise<any> => {
+    return workerFetch<any>('/api/trending/v2', { tabId, page }, signal ? { signal } : undefined);
   },
 };
 

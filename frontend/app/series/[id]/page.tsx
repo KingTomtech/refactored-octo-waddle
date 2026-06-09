@@ -10,6 +10,7 @@ import {
 import { useWorkerDetails, useWorkerSeasonInfo } from '@/hooks/useSearch';
 import { cn, ratingColor, yearOf } from '@/lib/utils';
 import { CastRow } from '@/components/CastRow';
+import { DetailRecSection } from '@/components/DetailRecSection';
 import { EpisodePicker } from '@/components/EpisodePicker';
 import { StreamModal } from '@/components/StreamModal';
 import { TrailerModal } from '@/components/TrailerModal';
@@ -51,6 +52,7 @@ export default function SeriesDetailPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-20 text-center">
         <AlertCircle size={48} className="mx-auto text-red-400 mb-3" />
         <p className="text-lg">Could not load this series.</p>
+        <p className="text-accent-yellow text-sm mt-1">Well, that didn&apos;t go as planned. Classic.</p>
         <p className="text-sm text-text-muted mt-1">{details.error instanceof Error ? details.error.message : 'Unknown error'}</p>
       </div>
     );
@@ -170,6 +172,11 @@ export default function SeriesDetailPage() {
             <CastRow cast={cast} />
           </section>
         )}
+
+        {/* Recommendations */}
+        <div className="mt-12">
+          <DetailRecSection id={id} />
+        </div>
       </div>
 
       <StreamModal

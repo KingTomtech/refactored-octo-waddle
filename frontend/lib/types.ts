@@ -194,6 +194,265 @@ export interface WorkerProbeResponse {
   testedAt: string;
 }
 
+// ── New worker types (unwired endpoints) ─────────────────────
+
+export interface WorkerRecommendItem {
+  id: string;
+  title: string;
+  poster?: string;
+  backdrop?: string;
+  rating?: number;
+  subjectType?: number;
+  releaseDate?: string;
+}
+
+export interface WorkerRecommendResponse {
+  ok: boolean;
+  data?: WorkerRecommendItem[];
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerBottomTab {
+  btTabType: string;
+  name: string;
+  btTabCode: string;
+  icon?: string;
+  statusWhite?: string;
+  url?: string;
+  operateTabId?: string;
+  displayType?: string;
+  badge?: string;
+}
+
+export interface WorkerHomeTab {
+  name: string;
+  tabId: number;
+  type: string;
+  tabCode?: string;
+  url?: string;
+  nameImage?: string;
+  selectNameImage?: string;
+  displayType?: string;
+}
+
+export interface WorkerBottomTabResponse {
+  ok: boolean;
+  data?: {
+    bottomTabs?: WorkerBottomTab[];
+    homeTabs?: WorkerHomeTab[];
+    version?: number;
+    badgeVer?: number;
+  };
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerFilterItem {
+  id: string | number;
+  name: string;
+  type?: string;
+  values?: { id: string | number; name: string }[];
+}
+
+export interface WorkerFilterResponse {
+  ok: boolean;
+  data?: WorkerFilterItem[];
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerListResponse {
+  ok: boolean;
+  data?: WorkerSearchResult[];
+  pager?: { page: number; perPage: number; total: number };
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerDubTrack {
+  name: string;
+  languageCode?: string;
+  url?: string;
+}
+
+export interface WorkerDubInfoResponse {
+  ok: boolean;
+  data?: WorkerDubTrack[];
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerWantToSeeResponse {
+  ok: boolean;
+  data?: any;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerStreamCaption {
+  url: string;
+  lang: string;
+  format: string;
+  label?: string;
+}
+
+export interface WorkerStreamCaptionsResponse {
+  ok: boolean;
+  data?: WorkerStreamCaption[];
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerSearchRankItem {
+  keyword: string;
+  hot?: number;
+}
+
+export interface WorkerSearchRankResponse {
+  ok: boolean;
+  data?: WorkerSearchRankItem[];
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerResourceItem {
+  resourceId: string;
+  resolution?: number;
+  format?: string;
+  size?: number;
+  url?: string;
+  episode?: number;
+  season?: number;
+}
+
+export interface WorkerResourceResponse {
+  ok: boolean;
+  data?: WorkerResourceItem[];
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+// ── APK-mapped types (v5 worker additions) ────────────────────
+
+export interface WorkerShort {
+  id: string;
+  title: string;
+  poster?: string;
+  backdrop?: string;
+  description?: string;
+  duration?: number;
+  videoUrl?: string;
+  likes?: number;
+  plays?: number;
+  subjectType?: number;
+  releaseDate?: string;
+}
+
+export interface WorkerShortsResponse {
+  ok: boolean;
+  data?: WorkerShort[];
+  pager?: { page: number; perPage: number; total: number };
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerShortInfo {
+  id: string;
+  title: string;
+  description?: string;
+  poster?: string;
+  backdrop?: string;
+  videoUrl?: string;
+  duration?: number;
+  plays?: number;
+  likes?: number;
+  authorId?: string;
+  authorName?: string;
+}
+
+export interface WorkerShortInfoResponse {
+  ok: boolean;
+  data?: WorkerShortInfo;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerStaffInfo {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  bio?: string;
+  dob?: string;
+  birthplace?: string;
+  filmography?: WorkerSearchResult[];
+}
+
+export interface WorkerStaffInfoResponse {
+  ok: boolean;
+  data?: WorkerStaffInfo;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerStaffRelated {
+  staffId: string;
+  related: WorkerSearchResult[];
+}
+
+export interface WorkerStaffRelatedResponse {
+  ok: boolean;
+  data?: WorkerStaffRelated;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerWidgetSection {
+  type: string;
+  title?: string;
+  items?: WorkerSearchResult[];
+}
+
+export interface WorkerWidgetResponse {
+  ok: boolean;
+  data?: WorkerWidgetSection[];
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerDailyRecResponse {
+  ok: boolean;
+  data?: WorkerSearchResult[];
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerPlaylistContentResponse {
+  ok: boolean;
+  data?: {
+    playlistId: string;
+    title?: string;
+    description?: string;
+    items?: WorkerSearchResult[];
+  };
+  source?: string;
+  error?: { code: string; message: string };
+}
+
+export interface WorkerSearchSuggestResponse {
+  ok: boolean;
+  data?: { keyword: string; subjects?: WorkerSearchResult[] }[];
+  degraded?: boolean;
+  source?: string;
+  error?: { code: string; message: string };
+}
+
 // ── Component prop types ────────────────────────────────────
 export interface MediaCardProps {
   id: string;

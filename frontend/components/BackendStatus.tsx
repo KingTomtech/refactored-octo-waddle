@@ -33,7 +33,7 @@ export function BackendStatus() {
         >
           <AlertCircle size={16} className={allDown ? 'text-red-400' : 'text-yellow-400'} />
           <span className="font-medium">
-            {allDown ? 'All MovieBox backends are unreachable' : 'Some MovieBox backends are having issues'}
+            {allDown ? 'All DPTV backends are unreachable' : 'Some DPTV backends are having issues'}
           </span>
           <span className="ml-auto flex items-center gap-3 text-text-muted">
             <span>cache {((health.data?.cacheHitRate ?? 0) * 100).toFixed(0)}%</span>

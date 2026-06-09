@@ -4,6 +4,7 @@ import './globals.css';
 import { Providers } from './providers';
 import { SiteHeader } from '@/components/SiteHeader';
 import { BackendStatus } from '@/components/BackendStatus';
+import { BottomNav } from '@/components/BottomNav';
 
 const bebas = Bebas_Neue({
   weight: '400',
@@ -19,12 +20,12 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'MovieBox — Stream Discovery',
-  description: 'Discover and stream movies and TV shows straight from the MovieBox catalogue.',
+  title: 'DPTV — Maximum Effort Streaming',
+  description: 'Maximum effort streaming. Discover and stream movies and series on DPTV.',
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
   openGraph: {
-    title: 'MovieBox — Stream Discovery',
-    description: 'Discover and stream movies and TV shows.',
+    title: 'DPTV — Maximum Effort Streaming',
+    description: 'Discover and stream movies and series.',
     type: 'website',
   },
 };
@@ -36,9 +37,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <SiteHeader />
           <BackendStatus />
-          <main className="pb-20">{children}</main>
+          <main className="pb-24 md:pb-20">{children}</main>
+          <BottomNav />
           <footer className="border-t border-border-subtle mt-20 py-8 text-center text-text-muted text-sm">
-            <p>MovieBox · Stream discovery via the MovieBox API · For demo purposes only</p>
+            <p>DPTV · Maximum effort streaming · For demo purposes only</p>
           </footer>
         </Providers>
       </body>

@@ -99,7 +99,7 @@ export function EpisodePicker({ workerId, workerSeasons, onPlay }: Props) {
           <div>
             <p className="font-medium">Stream unavailable</p>
             <p className="text-xs text-yellow-200/80">
-              We could not find this series in the MovieBox catalogue. Try searching the title directly.
+              We could not find this series in the DPTV catalogue. Try searching the title directly.
             </p>
           </div>
         </div>

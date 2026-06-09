@@ -5,6 +5,11 @@ import { useWorkerHomepage } from '@/hooks/useSearch';
 import { MediaCard, MediaCardSkeleton } from '@/components/MediaCard';
 import { MediaRow } from '@/components/MediaRow';
 import { HeroSlider } from '@/components/HeroSlider';
+import { TrendingSection } from '@/components/TrendingSection';
+import { TopRecSection } from '@/components/RecommendRow';
+import { DailyPicksSection } from '@/components/DailyPicksSection';
+import { WidgetSection } from '@/components/WidgetSection';
+import { PlaylistSection } from '@/components/PlaylistSection';
 import { yearOf } from '@/lib/utils';
 
 type RawSubject = {
@@ -44,11 +49,6 @@ function pickRating(s: RawSubject): number | undefined {
   if (!s.imdbRatingValue) return undefined;
   const n = Number(s.imdbRatingValue);
   return Number.isFinite(n) ? n : undefined;
-}
-
-function pickTrailerUrl(s: RawSubject): string | null {
-  if (s.preVideoAddress && s.preVideoAddress.length > 0) return s.preVideoAddress[0].url;
-  return null;
 }
 
 export default function HomePage() {
@@ -100,8 +100,27 @@ export default function HomePage() {
         </div>
       )}
 
-      <div className="mt-12 space-y-10">
-        <MediaRow title="Trending Movies ›" href="/browse?type=movie">
+      <div className="mt-12 space-y-10 max-w-7xl mx-auto px-4 sm:px-6">
+        {/* Top Picks from worker /api/top-rec */}
+        <TopRecSection />
+
+        {/* Daily Picks from /api/daily-movie-rec */}
+        <DailyPicksSection />
+
+        {/* Home widget sections (continue watching etc.) */}
+        <WidgetSection />
+
+        {/* Trending with category tabs */}
+        <section>
+          <h2 className="font-display text-2xl tracking-wide mb-4">Trending</h2>
+          <TrendingSection />
+        </section>
+
+        {/* Curated playlists */}
+        <PlaylistSection />
+
+        {/* Homepage seeded content as fallback rows */}
+        <MediaRow title="Popular Movies ›" href="/browse?type=movie">
           {isLoading
             ? Array.from({ length: 8 }).map((_, i) => <MediaCardSkeleton key={i} />)
             : movies.slice(0, 14).map((s) => (

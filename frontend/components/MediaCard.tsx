@@ -15,7 +15,7 @@ export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }
 
   const href = type === 'movie' ? `/movie/${id}` : `/series/${id}`;
   const ratingCls = ratingColor(rating);
-  const ratingColorMap = { good: 'text-rating-good', mid: 'text-rating-mid', bad: 'text-rating-bad', muted: 'text-text-muted' };
+  const ratingColorMap = { good: 'text-accent-yellow', mid: 'text-rating-mid', bad: 'text-rating-bad', muted: 'text-text-muted' };
   // Worker returns absolute URLs for posters; pass through unchanged.
   const posterUrl = poster?.startsWith('http') ? poster : poster ?? null;
 
@@ -34,11 +34,11 @@ export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }
       onMouseLeave={() => setHover(false)}
       whileHover={{ scale: 1.04, zIndex: 10 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className="relative shrink-0 w-[160px] sm:w-[180px] md:w-[200px] aspect-[2/3] rounded-md overflow-hidden bg-bg-secondary cursor-pointer group focus:outline-none focus:ring-2 focus:ring-accent"
+      className="card-hover relative shrink-0 w-[160px] sm:w-[180px] md:w-[200px] aspect-[2/3] rounded-md overflow-hidden bg-bg-secondary cursor-pointer group focus:outline-none focus:ring-2 focus:ring-accent"
       aria-label={`${title}${year ? ` (${year})` : ''}`}
     >
       {/* Skeleton */}
-      {!loaded && <div className="absolute inset-0 skeleton" />}
+      {!loaded && <div className="absolute inset-0 skeleton-pulse" />}
 
       {/* Poster */}
       {posterUrl ? (
@@ -59,14 +59,17 @@ export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }
 
       {/* Type badge */}
       <div className="absolute top-2 left-2 z-10">
-        <span className="px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[10px] font-semibold tracking-wider text-white uppercase">
+        <span className={type === 'movie' ? 'badge-movie' : 'badge-series'}>
           {type === 'movie' ? 'Movie' : 'Series'}
         </span>
       </div>
 
       {/* Rating badge */}
       {rating !== undefined && rating > 0 && (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur text-xs font-semibold">
+        <div className={cn(
+          'absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur text-xs font-semibold',
+          ratingCls === 'good' && 'bg-accent-yellow/20',
+        )}>
           <Star size={10} className={ratingColorMap[ratingCls]} fill="currentColor" />
           <span className={ratingColorMap[ratingCls]}>{rating.toFixed(1)}</span>
         </div>
@@ -96,5 +99,5 @@ export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }
 }
 
 export function MediaCardSkeleton() {
-  return <div className="shrink-0 w-[160px] sm:w-[180px] md:w-[200px] aspect-[2/3] rounded-md skeleton" />;
+  return <div className="shrink-0 w-[160px] sm:w-[180px] md:w-[200px] aspect-[2/3] rounded-md skeleton-pulse" />;
 }

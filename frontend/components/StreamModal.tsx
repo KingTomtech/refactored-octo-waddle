@@ -5,13 +5,13 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, AlertCircle, Download, Share2, RefreshCw,
-  Loader2, Volume2, Globe, Play, Pause,
+  Loader2, Volume2, Globe, Play, Pause, FileText,
 } from 'lucide-react';
 import { useStream, vlcDeepLink, iinaDeepLink, shareStream } from '@/hooks/useStream';
 import { fetchAndConvertSrt } from '@/lib/srt-to-vtt';
 import { QualitySelector } from './QualitySelector';
 import { SubtitleSelector } from './SubtitleSelector';
-import { cn, isHlsUrl, isMp4Url, formatTime } from '@/lib/utils';
+import { cn, isHlsUrl, isMp4Url, formatTime, downloadStreamPackage } from '@/lib/utils';
 import type { Quality, StreamSubtitle } from '@/lib/types';
 
 // Player is loaded client-only so its static imports of dashjs/hls.js never
@@ -176,7 +176,7 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
               {!stream.isLoading && stream.isError && (
                 <div className="flex flex-col items-center gap-3 text-text-muted p-6 text-center">
                   <AlertCircle size={40} className="text-red-400" />
-                  <p className="font-medium text-text-primary">Stream unavailable</p>
+                  <p className="font-medium text-text-primary">Well, that didn&apos;t go as planned. Classic.</p>
                   <p className="text-sm">Could not find a playable stream for this title right now.</p>
                   <button onClick={() => stream.refetch()} className="btn-secondary text-sm">
                     <RefreshCw size={14} /> Retry
@@ -187,7 +187,7 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
               {!stream.isLoading && !stream.isError && !primaryUrl && (
                 <div className="flex flex-col items-center gap-3 text-text-muted p-6 text-center">
                   <AlertCircle size={40} />
-                  <p className="font-medium text-text-primary">No stream available</p>
+                  <p className="font-medium text-text-primary">Looks like this one&apos;s taking a nap. Maximum effort required.</p>
                   <p className="text-sm max-w-md">This title is not currently available. Use the Open Stream / VLC / IINA links below if a URL appears.</p>
                 </div>
               )}
@@ -200,19 +200,31 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
                   {isDash && hevcNotSupported ? (
                     <div className="flex flex-col items-center gap-3 text-text-muted p-6 text-center max-w-lg">
                       <AlertCircle size={40} className="text-amber-400" />
-                      <p className="font-medium text-text-primary">HEVC (H.265) codec not supported by this browser</p>
-                      <p className="text-sm">This stream is encoded in H.265, which most browsers cannot decode. Use one of the options below — they all open the same stream URL.</p>
+                      <p className="font-medium text-text-primary">HEVC playback not available</p>
+                      <p className="text-sm text-accent-yellow mt-1">No luck, chimichangas.</p>
+                      <p className="text-sm">This stream is encoded in H.265/HEVC. Open it in a desktop player that supports HEVC — the proxy URL below includes authentication cookies.</p>
                       <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                        <a href={primaryUrl} target="_blank" rel="noreferrer" className="btn-primary text-sm">
-                          <Download size={14} /> Open Stream
-                        </a>
-                        <a href={vlcDeepLink(primaryUrl)} className="btn-secondary text-sm" title="Open in VLC">
-                          <Volume2 size={14} /> VLC
+                        <a href={vlcDeepLink(primaryUrl)} className="btn-primary text-sm" title="Open in VLC (all platforms)">
+                          <Volume2 size={14} /> Open in VLC
                         </a>
                         <a href={iinaDeepLink(primaryUrl)} className="btn-secondary text-sm" title="Open in IINA (macOS)">
                           <Globe size={14} /> IINA
                         </a>
+                        <button
+                          onClick={async () => {
+                            await navigator.clipboard.writeText(primaryUrl);
+                            setCopyState('copied');
+                            setTimeout(() => setCopyState('idle'), 2000);
+                          }}
+                          className="btn-secondary text-sm"
+                          title="Copy stream URL for mpv, ffplay, etc."
+                        >
+                          <Download size={14} /> {copyState === 'copied' ? 'Copied!' : 'Copy URL'}
+                        </button>
                       </div>
+                      <p className="text-xs text-text-muted mt-1">
+                        Tip: <code className="bg-white/10 px-1 rounded">mpv &quot;{primaryUrl}&quot;</code> also works
+                      </p>
                     </div>
                   ) : (
                     <StreamPlayer
@@ -351,6 +363,19 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
                     <a href={iinaDeepLink(primaryUrl)} className="btn-secondary text-sm" title="Open in IINA (macOS)">
                       <Globe size={14} /> IINA
                     </a>
+                    <button
+                      onClick={() => downloadStreamPackage({
+                        title,
+                        primaryUrl: primaryUrl,
+                        rawUrl: stream.rawUrl,
+                        cookies: stream.cookies,
+                        referer: stream.referer,
+                      })}
+                      className="btn-secondary text-sm"
+                      title="Download stream info as text file (URL, cookies, mpv/vlc commands)"
+                    >
+                      <FileText size={14} /> Info
+                    </button>
                   </>
                 )}
                 <div className="ml-auto text-xs text-text-muted flex items-center gap-1.5">

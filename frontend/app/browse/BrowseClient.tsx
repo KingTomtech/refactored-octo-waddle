@@ -61,7 +61,7 @@ export default function BrowseClient() {
           onClick={() => setType('tv')}
           className={cn('chip', type === 'tv' && 'chip-active')}
         >
-          <Tv size={14} /> TV Shows
+          <Tv size={14} /> Series
         </button>
       </div>
 

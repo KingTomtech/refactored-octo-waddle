@@ -57,20 +57,41 @@ export function StreamPlayer({
   const hevcWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventsWiredRef = useRef(false);
 
-  // Wire up native event listeners once
+  // Stash the latest callback identities in refs so the effects below don't
+  // need them in their dep arrays. Otherwise every parent re-render (e.g.
+  // when StreamModal updates `currentTime` on every timeupdate) recreates
+  // these inline arrow functions, blowing the effect dep array, tearing down
+  // the player, and producing the "play, stop, play" / "audio only" bug.
+  const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
+  const onCodecUnsupportedRef = useRef(onCodecUnsupported);
+  const onTimeRef = useRef(onTime);
+  const onPlayingRef = useRef(onPlaying);
+  const onPauseRef = useRef(onPause);
+  const onVolumeChangeRef = useRef(onVolumeChange);
+  onReadyRef.current = onReady;
+  onErrorRef.current = onError;
+  onCodecUnsupportedRef.current = onCodecUnsupported;
+  onTimeRef.current = onTime;
+  onPlayingRef.current = onPlaying;
+  onPauseRef.current = onPause;
+  onVolumeChangeRef.current = onVolumeChange;
+
+  // Wire up native event listeners once. The event handlers read the latest
+  // callback identity from the refs above, so re-wiring is never required.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || eventsWiredRef.current) return;
     eventsWiredRef.current = true;
 
-    const hPlay = () => onPlaying?.();
-    const hPause = () => onPause?.();
-    const hTime = () => onTime?.(v.currentTime, v.duration || 0);
-    const hMeta = () => onTime?.(v.currentTime, v.duration || 0);
-    const hVol = () => onVolumeChange?.(v.muted);
+    const hPlay = () => onPlayingRef.current?.();
+    const hPause = () => onPauseRef.current?.();
+    const hTime = () => onTimeRef.current?.(v.currentTime, v.duration || 0);
+    const hMeta = () => onTimeRef.current?.(v.currentTime, v.duration || 0);
+    const hVol = () => onVolumeChangeRef.current?.(v.muted);
     const hErr = () => {
       const err = v.error;
-      onError?.(err ? `Video: code ${err.code}` : 'Playback error');
+      onErrorRef.current?.(err ? `Video: code ${err.code}` : 'Playback error');
     };
     v.addEventListener('play', hPlay);
     v.addEventListener('pause', hPause);
@@ -89,7 +110,7 @@ export function StreamPlayer({
       v.removeEventListener('error', hErr);
       eventsWiredRef.current = false;
     };
-  }, [onPlaying, onPause, onTime, onError, onVolumeChange]);
+  }, []);
 
   // Attach the right player when the source changes
   useEffect(() => {
@@ -119,7 +140,7 @@ export function StreamPlayer({
 
       const dashjs = (window as any).dashjs;
       if (!dashjs) {
-        onError?.('DASH player not loaded');
+        onErrorRef.current?.('DASH player not loaded');
         return;
       }
 
@@ -134,9 +155,15 @@ export function StreamPlayer({
       // On non-native-HEVC browsers, we MUST wait for the hevc.js plugin
       // before initializing dash.js — otherwise dash.js will reject the
       // HEVC codec and produce audio-only playback. If hevc.js hasn't
-      // loaded yet, bail out and let the effect re-run when it's ready.
+      // loaded yet, arm the watchdog so the user gets a fallback panel
+      // if the plugin never loads, and bail out. The effect will re-run
+      // when `hevcReady` flips true (effect deps include it).
       if (!nativeHevc && !hevcReady) {
         console.log('[StreamPlayer] waiting for hevc.js plugin to load…');
+        // Surface a clear "loading codec…" state in the console so users
+        // can see why playback hasn't started. We don't arm a watchdog
+        // here because the next effect run (triggered by hevcReady=true)
+        // will initialize the player with the transcoder attached.
         return;
       }
 
@@ -158,10 +185,12 @@ export function StreamPlayer({
             hevcWatchdogRef.current = null;
             if (cancelled) return;
             if (tracksAvailable()) return;
+            // Video element might already be playing even if dashjs
+            // tracks report is delayed — check for actual playback.
             const ve = videoRef.current;
             if (ve && ve.readyState >= 2 && ve.currentTime > 0) return;
             console.warn(`[StreamPlayer] ${reason} — no playable tracks in 10s, falling back to external players`);
-            onCodecUnsupported?.();
+            onCodecUnsupportedRef.current?.();
           }, 10000);
         };
 
@@ -171,7 +200,7 @@ export function StreamPlayer({
           if (cancelled) return;
           const msg = e?.error?.message || e?.message || 'DASH playback error';
           console.error('[dashjs] error', e);
-          onError?.(msg);
+          onErrorRef.current?.(msg);
         });
 
         player.on('manifestLoaded', () => {
@@ -180,6 +209,8 @@ export function StreamPlayer({
             console.log('[StreamPlayer] manifestLoaded — playable video tracks available');
             return;
           }
+          // Manifest loaded but no tracks yet — the hevc.js transcoder
+          // might still be initializing, or the codec is unsupported.
           if (hevcCleanupRef.current) {
             console.warn('[StreamPlayer] hevc.js attached but no tracks yet — waiting for transcoder');
           } else if (!nativeHevc) {
@@ -219,6 +250,9 @@ export function StreamPlayer({
                 hevcCleanupRef.current = cleanup;
               } catch (err) {
                 console.warn('[StreamPlayer] hevc.js plugin init failed — will try native dash.js as fallback', err);
+                // Plugin failed — arm watchdog immediately. Without the
+                // transcoder, dash.js will reject HEVC Representations and
+                // produce no playable tracks on non-native-HEVC browsers.
                 armWatchdog('hevc.js plugin init failed');
               }
             } else {
@@ -232,10 +266,10 @@ export function StreamPlayer({
         })();
 
         dashRef.current = player;
-        if (v2) onReady?.(v2);
+        if (v2) onReadyRef.current?.(v2);
       } catch (e: any) {
         console.error('[StreamPlayer] dashjs init failed', e);
-        onError?.(e?.message || 'DASH init failed');
+        onErrorRef.current?.(e?.message || 'DASH init failed');
       }
     } else if (isHls) {
       if (!hlsReady) return;
@@ -246,21 +280,21 @@ export function StreamPlayer({
         hls.attachMedia(v);
         hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
           if (cancelled) return;
-          if (data?.fatal) onError?.(`HLS: ${data.details || 'playback error'}`);
+          if (data?.fatal) onErrorRef.current?.(`HLS: ${data.details || 'playback error'}`);
         });
         hlsRef.current = hls;
-        onReady?.(v);
+        onReadyRef.current?.(v);
       } else {
         // Safari native HLS
         v.src = src;
         if (autoPlay) v.play().catch(() => {});
-        onReady?.(v);
+        onReadyRef.current?.(v);
       }
     } else {
       // Native MP4
       v.src = src;
       if (autoPlay) v.play().catch(() => {});
-      onReady?.(v);
+      onReadyRef.current?.(v);
     }
 
     return () => {
@@ -270,7 +304,7 @@ export function StreamPlayer({
       if (dashRef.current) { try { dashRef.current.reset(); } catch {} dashRef.current = null; }
       if (hevcCleanupRef.current) { try { hevcCleanupRef.current(); } catch {} hevcCleanupRef.current = null; }
     };
-  }, [src, isDash, isHls, autoPlay, dashjsReady, hlsReady, hevcReady, onError, onReady]);
+  }, [src, isDash, isHls, autoPlay, dashjsReady, hlsReady, hevcReady]);
 
   return (
     <video

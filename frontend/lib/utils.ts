@@ -65,3 +65,66 @@ export function formatTime(seconds?: number | null): string {
   if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
+
+/**
+ * Creates a downloadable .txt file containing stream info
+ * (URL, raw MPD URL, cookies, referer, mpv/vlc command lines)
+ * for use in external players.
+ */
+export function downloadStreamPackage(info: {
+  title: string;
+  primaryUrl: string | null;
+  rawUrl?: string | null;
+  cookies?: string[];
+  referer?: string | null;
+}): void {
+  const lines: string[] = [
+    `DPTV Stream Package: ${info.title}`,
+    `Generated: ${new Date().toISOString()}`,
+    '',
+    '=== Stream URL ===',
+    info.primaryUrl ?? '(not available)',
+    '',
+  ];
+
+  if (info.rawUrl) {
+    lines.push('=== Raw MPD URL ===', info.rawUrl, '');
+  }
+
+  if (info.referer) {
+    lines.push('=== Referer ===', info.referer, '');
+  }
+
+  if (info.cookies && info.cookies.length > 0) {
+    lines.push('=== Cookies ===');
+    info.cookies.forEach((c) => lines.push(c));
+    lines.push('');
+  }
+
+  if (info.primaryUrl) {
+    lines.push(
+      '=== Player Commands ===',
+      `mpv "${info.primaryUrl}"`,
+      `vlc "${info.primaryUrl}"`,
+    );
+    if (info.rawUrl && info.cookies && info.cookies.length > 0) {
+      const cookieHeader = info.cookies.join('; ');
+      lines.push(
+        '',
+        '=== mpv with cookies ===',
+        `mpv --http-header="Cookie: ${cookieHeader}" --http-header="Referer: ${info.referer ?? ''}" "${info.rawUrl}"`,
+      );
+    }
+  }
+
+  const content = lines.join('\n');
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dptv-${info.title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

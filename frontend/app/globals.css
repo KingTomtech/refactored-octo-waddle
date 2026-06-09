@@ -12,6 +12,8 @@
   --bg-tertiary: #161625;
   --accent: #e50914;
   --accent-hover: #f40612;
+  --accent-yellow: #ffc107;
+  --accent-yellow-hover: #ffca28;
   --text-primary: #ffffff;
   --text-secondary: #a0a0b0;
   --text-muted: #606070;
@@ -34,18 +36,21 @@ html, body {
   overflow-x: hidden;
 }
 
+/* Firefox thin scrollbar with red accent */
+* { scrollbar-width: thin; scrollbar-color: rgba(229,9,20,0.3) transparent; }
+
 a { color: inherit; text-decoration: none; }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.1);
-  border-radius: 4px;
+  background: rgba(229,9,20,0.3);
+  border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb:hover { background: rgba(229,9,20,0.5); }
 
 /* Hide scrollbar on horizontal row but keep functionality */
 .scroll-row {
@@ -64,7 +69,11 @@ a { color: inherit; text-decoration: none; }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-md transition-colors;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-md transition-all;
+    box-shadow: 0 2px 12px rgba(229,9,20,0.3);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 4px 20px rgba(229,9,20,0.5);
   }
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-md transition-colors backdrop-blur;
@@ -81,17 +90,45 @@ a { color: inherit; text-decoration: none; }
   .skeleton {
     @apply bg-gradient-to-r from-bg-secondary via-bg-tertiary to-bg-secondary bg-[length:200%_100%] animate-[shimmer_1.5s_infinite];
   }
+  .skeleton-pulse {
+    @apply bg-bg-secondary animate-[redPulse_2s_ease-in-out_infinite];
+  }
   .card-hover {
-    @apply transition-all duration-300 hover:scale-[1.04] hover:z-10 hover:shadow-2xl hover:shadow-black/50;
+    @apply transition-all duration-300 hover:scale-[1.04] hover:z-10 hover:shadow-glow-red hover:border-b-2 hover:border-accent;
   }
   .glass {
     @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+  .badge-movie {
+    @apply inline-flex items-center px-2 py-0.5 rounded bg-accent text-white text-[10px] font-semibold tracking-wider uppercase;
+  }
+  .badge-series {
+    @apply inline-flex items-center px-2 py-0.5 rounded bg-black/80 text-accent border border-accent/40 text-[10px] font-semibold tracking-wider uppercase;
+  }
+  .badge-rating-good {
+    @apply flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent-yellow/20 text-accent-yellow text-xs font-semibold;
   }
 }
 
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+@keyframes redPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; background-color: #1a0a0a; }
+}
+
+@keyframes progressFill {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+@layer utilities {
+  .text-shadow-red {
+    text-shadow: 0 0 20px rgba(229,9,20,0.6), 0 0 40px rgba(229,9,20,0.3);
+  }
 }
 
 /* Hide Vidstack focus ring issues on dark */

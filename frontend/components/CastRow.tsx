@@ -23,6 +23,7 @@ export function CastRow({ cast, onSelect }: Props) {
             key={member.staffId}
             onClick={() => {
               if (onSelect) onSelect(member);
+              else if (member.staffId) router.push(`/staff/${member.staffId}`);
               else router.push(`/search?q=${encodeURIComponent(name)}`);
             }}
             className="shrink-0 w-[120px] text-left group"

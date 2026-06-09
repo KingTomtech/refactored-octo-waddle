@@ -48,7 +48,7 @@ export default function SearchClient() {
             onClick={() => setFilter(f)}
             className={cn('chip', filter === f && 'chip-active')}
           >
-            {f === 'all' ? 'All' : f === 'movie' ? <><Film size={14} /> Movies</> : <><Tv size={14} /> TV</>}
+            {f === 'all' ? 'All' : f === 'movie' ? <><Film size={14} /> Movies</> : <><Tv size={14} /> Series</>}
           </button>
         ))}
         {debouncedQ && workerResults.length > 0 && (

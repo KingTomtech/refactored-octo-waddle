@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, Loader2, Check } from 'lucide-react';
+import { Download, Loader2, Check, FileText } from 'lucide-react';
 import { useStream } from '@/hooks/useStream';
 import { vlcDeepLink, iinaDeepLink } from '@/hooks/useStream';
-import { cn } from '@/lib/utils';
+import { cn, downloadStreamPackage } from '@/lib/utils';
 import type { Quality } from '@/lib/types';
 
 interface Props {
@@ -73,6 +73,24 @@ export function DownloadButton({ workerId, title, defaultQuality = 'best', varia
         >
           {copied ? <Check size={14} /> : null}
           {copied ? 'Copied' : 'Copy URL'}
+        </button>
+        <button
+          onClick={() => {
+            if (url) {
+              downloadStreamPackage({
+                title,
+                primaryUrl: url,
+                rawUrl: stream.rawUrl,
+                cookies: stream.cookies,
+                referer: stream.referer,
+              });
+            }
+          }}
+          className="btn-ghost text-sm"
+          disabled={!url}
+          title="Download stream info as text file"
+        >
+          <FileText size={14} /> Info
         </button>
       </div>
       <p className="text-xs text-text-muted">{stream.quality ? `Best available: ${stream.quality}` : title}</p>

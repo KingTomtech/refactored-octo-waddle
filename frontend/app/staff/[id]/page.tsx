@@ -60,6 +60,8 @@ export default function StaffPage({ params }: { params: { id: string } }) {
                       poster={s.poster ?? null}
                       rating={s.rating}
                       year={s.year}
+                      hasResource={(s as any).hasResource}
+                      corner={(s as any).corner}
                     />
                   ))}
                 </div>
@@ -85,6 +87,8 @@ export default function StaffPage({ params }: { params: { id: string } }) {
                       poster={s.poster ?? null}
                       rating={s.rating}
                       year={s.year}
+                      hasResource={(s as any).hasResource}
+                      corner={(s as any).corner}
                     />
                   ))}
                 </div>

@@ -44,6 +44,8 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
   const [muted, setMuted] = useState(false);
   const [hevcNotSupported, setHevcNotSupported] = useState(false);
   const [showStreamInfo, setShowStreamInfo] = useState(false);
+  // Detector/source choice (APK ResourceDetector adapters pattern: show type/resolutionList for multi-source)
+  const [selectedDetectorIdx, setSelectedDetectorIdx] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -52,6 +54,9 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
   const isHls = isHlsUrl(primaryUrl);
   const isMp4 = isMp4Url(primaryUrl);
   const isDash = stream.isDash;
+  // Rich from decompile (VideoDetailStreamList + Subject): detectors (Alone/MultiRes/Collection adapters), extCaptions+delay
+  const detectors: any[] = stream.resourceDetectors || [];
+  const extCaptions: any[] = stream.extCaptions || [];
 
   // Reset state on open/close
   useEffect(() => {
@@ -277,16 +282,41 @@ export function StreamModal({ open, onClose, title, workerId, initialQuality = '
 
             {/* Custom controls + action bar — always visible */}
             <div className="px-4 py-3 border-t border-border-subtle space-y-3 bg-bg-secondary">
-              {/* Quality + Captions */}
+              {/* Quality + Captions + Source detectors (decompile adapter guidance) */}
               <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                 <div>
                   <p className="text-xs text-text-muted mb-1.5">Quality</p>
                   <QualitySelector value={quality} onChange={setQuality} size="sm" />
                 </div>
+                {detectors.length > 0 && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1.5">Source (ResourceDetector)</p>
+                    <select
+                      value={selectedDetectorIdx}
+                      onChange={(e) => setSelectedDetectorIdx(Number(e.target.value))}
+                      className="text-sm bg-white/10 border border-white/10 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
+                    >
+                      {detectors.map((d: any, i: number) => (
+                        <option key={i} value={i}>
+                          {d.source || 'Source'} {d.type === 1 ? '(Collection)' : d.resolutionList?.length > 1 ? '(Multi)' : ''} {d.resolutionList ? `· ${d.resolutionList.length} res` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {detectors[selectedDetectorIdx]?.resolutionList && (
+                      <div className="text-[10px] text-text-muted mt-0.5">Res: {detectors[selectedDetectorIdx].resolutionList.map((r: any) => r.resolution || '?').join(', ')}</div>
+                    )}
+                    {detectors[selectedDetectorIdx]?.signCookie && (
+                      <div className="text-[10px] text-accent mt-0.5">signCookie available (use for dl)</div>
+                    )}
+                  </div>
+                )}
                 {subtitles.length > 0 && (
                   <div>
                     <p className="text-xs text-text-muted mb-1.5">Captions</p>
-                    <SubtitleSelector subtitles={subtitles} value={activeSubtitle} onChange={setActiveSubtitle} />
+                    <SubtitleSelector subtitles={subtitles} value={activeSubtitle} onChange={setActiveSubtitle} extCaptions={extCaptions} />
+                    {extCaptions.length > 0 && (
+                      <div className="text-[10px] text-text-muted mt-0.5">Ext captions with delay (decompile) — labels show offset; native track may need manual sync in player</div>
+                    )}
                   </div>
                 )}
                 {primaryUrl && (

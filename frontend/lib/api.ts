@@ -141,6 +141,10 @@ function normaliseStream(raw: any): WorkerStreamResponse {
     resourceId: d.resourceId,
     subtitles: Array.isArray(d.subtitles) ? d.subtitles : undefined,
     sources: [{ url: d.url, quality, mimeType }],
+    // Rich data from APK decompile (VideoDetailStreamList / resourceDetectors on Subject)
+    // These contain signCookie, resolutionList, downloadUrl per source for advanced use.
+    resourceDetectors: Array.isArray(d.resourceDetectors) ? d.resourceDetectors : undefined,
+    streams: Array.isArray(d.streams) ? d.streams : undefined,
   };
   return {
     ok: true,
@@ -169,6 +173,23 @@ function normaliseEpisode(raw: any, id: string, season: number, episode: number)
   return { ok: true, data: out, source: raw?.source ?? 'origin' };
 }
 
+function normaliseResourceDetector(det: any) {
+  return {
+    type: det?.type,
+    totalEpisode: det?.totalEpisode,
+    totalSize: det?.totalSize,
+    uploadTime: det?.uploadTime,
+    uploadBy: det?.uploadBy,
+    resourceLink: det?.resourceLink,
+    downloadUrl: det?.downloadUrl,
+    source: det?.source,
+    resourceId: det?.resourceId,
+    resolutionList: Array.isArray(det?.resolutionList) ? det.resolutionList : undefined,
+    extSubtitle: det?.extSubtitle,
+    signCookie: det?.signCookie,
+  };
+}
+
 function normaliseDetails(raw: any): WorkerDetails {
   if (!raw || raw.ok === false) return raw as WorkerDetails;
   const d = raw.data ?? raw;
@@ -181,7 +202,7 @@ function normaliseDetails(raw: any): WorkerDetails {
     ? String(d.genre).split(/,\s*/).filter(Boolean)
     : undefined;
 
-  // Cast vs crew from staffList
+  // Cast vs crew from staffList (decompile: staffType 1=actor, 2=director on Subject)
   const staffList: any[] = Array.isArray(d.staffList) ? d.staffList : [];
   const cast = staffList.filter((s: any) => s.staffType === 1);
   const crew = staffList.filter((s: any) => s.staffType === 2);
@@ -214,6 +235,21 @@ function normaliseDetails(raw: any): WorkerDetails {
     imdbRatingValue: d.imdbRatingValue,
     subjectId,
     subjectType,
+    // Additional rich fields from decompiled Subject bean (APK-CLASSES.md + direct sources)
+    hasResource: d.hasResource,
+    resourceDetectors: Array.isArray(d.resourceDetectors) ? d.resourceDetectors.map(normaliseResourceDetector) : undefined,
+    dubs: Array.isArray(d.dubs) ? d.dubs : undefined,
+    subtitles: Array.isArray(d.subtitles) ? d.subtitles : undefined,
+    corner: d.corner,  // language/region badge (used for English filter)
+    wantToSeeCount: d.wantToSeeCount,
+    staffList,  // full list as in decompile
+    series: d.series,
+    seNum: d.seNum,
+    totalEpisode: d.totalEpisode,
+    likeStatus: d.likeStatus,
+    seenStatus: d.seenStatus,
+    mySeeTime: d.mySeeTime,
+    gameInfo: d.gameInfo,
     raw: d,
   };
 }
@@ -244,6 +280,10 @@ function normaliseSubtitle(raw: any): WorkerSubtitleResponse {
     lang: c.lan || 'en',
     format: (c.url || '').split('.').pop() || 'srt',
     label: c.lanName || c.lan || 'Unknown',
+    // Additional from decompile (ExtCaption/SubtitleItem): delay for sync, season/episode
+    delay: c.delay,
+    season: c.season,
+    episode: c.episode,
   }));
   return {
     ok: true,
@@ -268,6 +308,8 @@ function normaliseHealth(raw: any): WorkerHealth {
     cacheHits: Number(raw.cacheHits ?? 0),
     cacheMisses: Number(raw.cacheMisses ?? 0),
     lastSuccessfulBackend: raw.activeBackend ?? null,
+    activeBackend: raw.activeBackend ?? null,
+    operational: raw.operational ?? undefined,
     timestamp: raw.timestamp ?? new Date().toISOString(),
   };
 }
@@ -698,7 +740,8 @@ export const api = {
   resourceList: async (id: string, signal?: AbortSignal): Promise<WorkerResourceResponse> => {
     const raw = await workerFetch<any>('/api/resource', { id }, signal ? { signal } : undefined);
     const d = raw?.data ?? {};
-    // Upstream returns DownloadListBean: { resourceList: [{ resourceId, resolution, format, size, episode, season, shareUrl, ... }] }
+    // Upstream returns DownloadListBean (from yx/a, l10/a decompile): { resourceList or resources: [...] }.
+    // Richer play-info responses also expose resourceDetectors (with signCookie, resolutionList) per VideoDetailStreamList.
     const list: any[] = Array.isArray(d?.resourceList) ? d.resourceList
       : Array.isArray(d?.resources) ? d.resources
       : Array.isArray(raw?.data) ? raw.data
@@ -712,7 +755,18 @@ export const api = {
       episode: r.episode ? Number(r.episode) : undefined,
       season: r.season ? Number(r.season) : undefined,
     }));
-    return { ok: !!raw?.ok, data: mapped, source: raw?.source };
+    const detectors = Array.isArray(d?.resourceDetectors) ? d.resourceDetectors.map((det: any) => ({
+      type: det.type,
+      source: det.source,
+      resourceId: det.resourceId,
+      downloadUrl: det.downloadUrl,
+      resourceLink: det.resourceLink,
+      resolutionList: det.resolutionList,
+      extSubtitle: det.extSubtitle,
+      totalSize: det.totalSize,
+      signCookie: det.signCookie,
+    })) : undefined;
+    return { ok: !!raw?.ok, data: mapped, detectors, source: raw?.source };
   },
 
   // ── v5 APK-mapped endpoints ───────────────────────────────────
@@ -749,6 +803,18 @@ export const api = {
     return normaliseShorts(raw);
   },
 
+  /** Dub/audio for shorts (APK-mapped /shorts/dub-info from decompile yx/a) */
+  shortsDubInfo: async (id: string, signal?: AbortSignal): Promise<WorkerDubInfoResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/dub-info', { id }, signal ? { signal } : undefined);
+    return normaliseDubInfo(raw);
+  },
+
+  /** Mini-captions for short episodes (APK /shorts/get-mini-captions + wefeed-short-bff variant, ty/a) */
+  shortsMiniCaptions: async (miniId: string, signal?: AbortSignal): Promise<WorkerStreamCaptionsResponse> => {
+    const raw = await workerFetch<any>('/api/shorts/get-mini-captions', { miniId }, signal ? { signal } : undefined);
+    return normaliseStreamCaptions(raw);
+  },
+
   /** Cast/crew member's profile + filmography */
   staffInfo: async (id: string, signal?: AbortSignal): Promise<WorkerStaffInfoResponse> => {
     const raw = await workerFetch<any>('/api/staff-info', { id }, signal ? { signal } : undefined);
@@ -783,6 +849,40 @@ export const api = {
   trendingV2: async (tabId = '0', page = 1, signal?: AbortSignal): Promise<any> => {
     return workerFetch<any>('/api/trending/v2', { tabId, page }, signal ? { signal } : undefined);
   },
+
+  // v6 additions (full download state + shorts operating + sniff from decompile)
+  resourcePosition: async (params: any, signal?: AbortSignal) => workerFetch<any>('/api/resource-position', params, signal ? { signal } : undefined),
+  startDownloadResource: async (body: any, host = '') => {
+    const p = host ? `?host=${encodeURIComponent(host)}` : '';
+    const res = await fetch((WORKER_BASE || '') + '/api/start-download-resource' + p, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('start-download ' + res.status);
+    return res.json();
+  },
+  finishDownloadResource: async (body: any, host = '') => {
+    const p = host ? `?host=${encodeURIComponent(host)}` : '';
+    const res = await fetch((WORKER_BASE || '') + '/api/finish-download-resource' + p, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('finish-download ' + res.status);
+    return res.json();
+  },
+  shortsOperating: async (version = '', signal?: AbortSignal) => {
+    const params: any = {};
+    if (version) params.version = version;
+    return workerFetch<any>('/api/shorts/operating', params, signal ? { signal } : undefined);
+  },
+  searchAnalyzeSeek: async (body: any, host = '') => {
+    const p = host ? `?host=${encodeURIComponent(host)}` : '';
+    const res = await fetch((WORKER_BASE || '') + '/api/search-analyze-seek' + p, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('analyze-seek ' + res.status);
+    return res.json();
+  },
+  /** Sniff config for download links */
+  sniffConfig: async (params: any, signal?: AbortSignal) => workerFetch<any>('/api/sniff-config', params, signal ? { signal } : undefined),
 };
 
 export { WORKER_BASE };

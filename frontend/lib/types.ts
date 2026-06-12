@@ -112,6 +112,21 @@ export interface WorkerDetails {
   imdbRatingValue?: string;
   subjectId?: string;
   subjectType?: number;
+  // Rich fields surfaced from APK decompile (Subject bean in APK-CLASSES.md and direct sources)
+  hasResource?: boolean;
+  resourceDetectors?: WorkerResourceDetector[];
+  dubs?: any[]; // DubsInfoData[]
+  subtitles?: any[]; // SubtitleItem[]
+  corner?: string;       // language badge for filtering (e.g. "English")
+  wantToSeeCount?: number;
+  staffList?: WorkerStaff[]; // full with staffType
+  series?: boolean;
+  seNum?: number;
+  totalEpisode?: number;
+  likeStatus?: number;
+  seenStatus?: number;
+  mySeeTime?: string;
+  gameInfo?: any;
   raw?: any;             // pass-through of raw backend data for edge cases
 }
 
@@ -126,6 +141,9 @@ export interface WorkerStream {
   subtitles?: StreamSubtitle[];
   referer?: string;
   userAgent?: string;
+  // From decompile play-info (VideoDetailStreamList + resourceDetectors on Subject)
+  resourceDetectors?: WorkerResourceDetector[];
+  streams?: any[];  // raw stream entries with signCookie, extCaptions, etc.
 }
 
 export interface WorkerStreamResponse {
@@ -177,6 +195,8 @@ export interface WorkerHealth {
   cacheHits: number;
   cacheMisses: number;
   lastSuccessfulBackend: string | null;
+  activeBackend?: string | null;   // current active upstream (from worker health)
+  operational?: boolean;           // worker believes it can serve useful (cached + failover) data
   timestamp: string;
 }
 
@@ -329,9 +349,46 @@ export interface WorkerResourceItem {
   season?: number;
 }
 
+// Rich structures from APK decompile (APK-CLASSES.md):
+// Subject has 55+ fields incl. resourceDetectors (for downloads/stream sources),
+// staffList, dubs, subtitles, corner (lang badge), preVideo*, stills, hasResource, etc.
+// VideoDetailStreamList (play-info) has streams[] + resourceDetectors with signCookie + resolutionList.
+// See also BaseDto<T> wrappers, ResourcesSeasonList, etc.
+export interface WorkerResourceDetector {
+  type?: number; // 0=single, 1=collection, etc. from decompile adapters (Alone/MultiRes/Collection)
+  totalEpisode?: number;
+  totalSize?: number;
+  uploadTime?: string;
+  uploadBy?: string;
+  resourceLink?: string;
+  downloadUrl?: string;
+  source?: string;
+  resourceId?: string;
+  firstSize?: number;
+  postId?: string;
+  extSubtitle?: WorkerStreamCaption[]; // or SubtitleItem
+  resolutionList?: Array<{ resolution?: number; resourceLink?: string; epNum?: number; size?: number }>;
+  resolution?: number;
+  signCookie?: string; // from streams
+  // From decompile: ResourceDetectors in moviedetailapi/shorttv beans, used in ResourceDetector*Adapter dialogs for source/quality choice.
+  // Used for multi-source download/stream detection.
+}
+
+export interface WorkerExtCaption {
+  id?: string;
+  lan?: string;
+  lanName?: string;
+  url?: string;
+  size?: number;
+  delay?: number;  // subtitle sync offset (ms) from decompile SubtitleItem/ExtCaption
+  season?: number;
+  episode?: number;
+}
+
 export interface WorkerResourceResponse {
   ok: boolean;
   data?: WorkerResourceItem[];
+  detectors?: any[]; // WorkerResourceDetector[] from decompile adapters
   source?: string;
   error?: { code: string; message: string };
 }

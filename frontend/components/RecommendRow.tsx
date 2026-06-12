@@ -30,6 +30,8 @@ export function TopRecSection() {
               poster={s.poster ?? null}
               rating={s.rating}
               year={s.releaseDate ? yearOf(s.releaseDate) : undefined}
+              hasResource={(s as any).hasResource}
+              corner={(s as any).corner}
             />
           ))}
     </MediaRow>

@@ -137,6 +137,8 @@ export default function MovieDetailPage() {
               ))}
               {w.country && <span className="text-text-muted text-xs">{w.country}</span>}
               {w.language && <span className="text-text-muted text-xs">{w.language}</span>}
+              {w.corner && <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px]">{w.corner}</span>}
+              {w.hasResource && <span className="px-1.5 py-0.5 rounded bg-accent/20 text-accent text-[10px]">Resources</span>}
             </div>
 
             <p className="text-base text-text-primary/90 leading-relaxed mb-6 max-w-3xl">
@@ -178,6 +180,28 @@ export default function MovieDetailPage() {
             <CastRow cast={cast} />
           </section>
         )}
+
+        {/* Rich APK fields: dubs, resource detectors (multi-source), corner/hasResource surfaced */}
+        {(w.dubs && w.dubs.length > 0) || (w.resourceDetectors && w.resourceDetectors.length > 0) ? (
+          <section className="mt-12">
+            <h2 className="font-display text-2xl tracking-wide mb-3">Audio & Sources</h2>
+            <div className="grid sm:grid-cols-2 gap-4 text-sm">
+              {w.dubs && w.dubs.length > 0 && (
+                <div className="p-3 rounded bg-bg-tertiary/60">
+                  <div className="text-xs text-text-muted mb-1">Dubs</div>
+                  <div className="flex flex-wrap gap-1.5">{w.dubs.map((d: any, i: number) => <span key={i} className="px-2 py-0.5 rounded bg-white/10 text-xs">{d.name || d.language || 'Dub'}</span>)}</div>
+                </div>
+              )}
+              {w.resourceDetectors && w.resourceDetectors.length > 0 && (
+                <div className="p-3 rounded bg-bg-tertiary/60">
+                  <div className="text-xs text-text-muted mb-1">Sources (detectors)</div>
+                  <a href={`/downloads?prefill=${id}`} className="text-accent text-xs hover:underline">Open in Downloads →</a>
+                  <div className="text-xs text-text-muted mt-1">{w.resourceDetectors.length} source{w.resourceDetectors.length > 1 ? 's' : ''} · {w.resourceDetectors[0]?.source || 'multi-res'}</div>
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
 
         {/* Recommendations */}
         <div className="mt-12">

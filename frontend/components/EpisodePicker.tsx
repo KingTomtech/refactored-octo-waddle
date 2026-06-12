@@ -11,6 +11,7 @@ interface Props {
   workerId: string | null;
   workerSeasons?: WorkerSeason[];
   onPlay?: (season: number, episode: number, title: string) => void;
+  // For shorts (subjectType 7 / ShortTv): use shortsMiniList + shorts get-mini-captions instead (see shorts/[id] page)
 }
 
 type EpisodeStub = {
@@ -107,7 +108,7 @@ export function EpisodePicker({ workerId, workerSeasons, onPlay }: Props) {
 
       {/* Episode list */}
       {!episodes.length ? (
-        <p className="text-text-muted text-sm">No episode information available.</p>
+        <p className="text-text-muted text-sm">No episode information available. (For shorts use mini-list via /shorts/[id] or operating discover.)</p>
       ) : (
         <div className="grid sm:grid-cols-2 gap-3">
           {episodes.map((ep) => {

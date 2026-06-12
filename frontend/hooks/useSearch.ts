@@ -260,6 +260,26 @@ export function useWorkerShortsMiniList(id: string | null | undefined, startPosi
   });
 }
 
+/** Dub info for a short (from decompiled shorts/dub-info) */
+export function useWorkerShortsDubInfo(id: string | null | undefined) {
+  return useQuery<WorkerDubInfoResponse>({
+    queryKey: ['worker', 'shorts', 'dub', id],
+    queryFn: ({ signal }) => api.shortsDubInfo(id!, signal),
+    enabled: !!id,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/** Mini-captions for short episode (from decompiled shorts/get-mini-captions) */
+export function useWorkerShortsMiniCaptions(miniId: string | null | undefined) {
+  return useQuery<WorkerStreamCaptionsResponse>({
+    queryKey: ['worker', 'shorts', 'mini-captions', miniId],
+    queryFn: ({ signal }) => api.shortsMiniCaptions(miniId!, signal),
+    enabled: !!miniId,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
 /** Cast/crew member's profile + filmography */
 export function useWorkerStaffInfo(id: string | null | undefined) {
   return useQuery<WorkerStaffInfoResponse>({
@@ -325,6 +345,48 @@ export function useWorkerResourceList(id: string | null | undefined) {
     queryKey: ['worker', 'resource', id],
     queryFn: ({ signal }) => api.resourceList(id!, signal),
     enabled: !!id,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/** Shorts operating / discover sections */
+export function useWorkerShortsOperating(version = '') {
+  return useQuery<any>({
+    queryKey: ['worker', 'shorts', 'operating', version],
+    queryFn: ({ signal }) => api.shortsOperating(version, signal),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Resource position for downloads */
+export function useWorkerResourcePosition(params: any) {
+  return useQuery<any>({
+    queryKey: ['worker', 'resourcePosition', params],
+    queryFn: ({ signal }) => api.resourcePosition(params, signal),
+    enabled: !!params?.subjectId || !!params?.id,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Start/finish download (tracking) */
+export function useStartDownloadResource() {
+  return useMutation({
+    mutationFn: (data: { body: any; host?: string }) => api.startDownloadResource(data.body, data.host || ''),
+  });
+}
+
+export function useFinishDownloadResource() {
+  return useMutation({
+    mutationFn: (data: { body: any; host?: string }) => api.finishDownloadResource(data.body, data.host || ''),
+  });
+}
+
+/** Sniff config */
+export function useSniffConfig(params: any) {
+  return useQuery<any>({
+    queryKey: ['worker', 'sniff', params],
+    queryFn: ({ signal }) => api.sniffConfig(params, signal),
+    enabled: !!params,
     staleTime: 30 * 60 * 1000,
   });
 }

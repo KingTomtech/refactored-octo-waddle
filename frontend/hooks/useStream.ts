@@ -36,6 +36,9 @@ export interface StreamResult {
   referer: string | null;
   resourceId: string | null;
   subtitles: StreamSubtitle[];
+  // Rich APK decompile fields (VideoDetailStreamList + Subject resourceDetectors)
+  resourceDetectors?: any[];
+  extCaptions?: any[]; // with delay for subtitle sync
   isLoading: boolean;
   isError: boolean;
   error: unknown;
@@ -88,6 +91,9 @@ export function useStream(
       referer: typeof data?.referer === 'string' ? data.referer : null,
       resourceId: data?.resourceId ?? null,
       subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+      // Forward rich detector / extCaption (delay) data for modal/details/downloads
+      resourceDetectors: Array.isArray(data?.resourceDetectors) ? data.resourceDetectors : undefined,
+      extCaptions: Array.isArray(data?.extCaptions) ? data.extCaptions : (Array.isArray(data?.streams?.[0]?.extCaptions) ? data.streams[0].extCaptions : undefined),
       isLoading: q.isLoading,
       isError: q.isError,
       error: q.error,

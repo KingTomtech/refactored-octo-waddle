@@ -146,9 +146,9 @@ with the proxy URL + cookies + ready-to-paste `mpv` / `ffplay` /
                               └──────────────────────────┘
 ```
 
-The full reverse-engineering surface (40+ endpoints, signing protocol,
-data model, network layer) is documented in `APK-CLASSES.md` and
-`APK_FEATURE_MAP.md`.
+The full reverse-engineering surface (130+ endpoints from the decompile, signing protocol with exact canonical + GW.4410 time-sync, SubjectType/BottomTab enums, resourceDetectors + signCookie, shorts/staff/widget flows, etc.) is documented in `APK-CLASSES.md`, `APK_FEATURE_MAP.md`, and `APK-ANALYSIS.md`.
+
+Worker v6.0.0 implements **full public feature parity** with the decompile (all discovery, playback, shorts, staff, recs, widget/daily/playlist, complete /resource + position, start/finish download tracking, shorts/operating, sniff-config, search-analyze-seek, group search/join, etc.). See DECOMPILED_*.md for bean/endpoint details from the actual sources (Subject, VideoDetailStreamList with signCookie/extCaptions/resourceDetectors, ResourcesSeasonList, DownloadListBean, OperatingResp, etc.). Host pinning, exact canonical signing (per GatewaySignManager + sercurity/* + doGzipOrSign), and English corner filter are first-class. Stateful social/auth/VIP remain out of scope.
 
 ---
 
@@ -234,7 +234,7 @@ Confirm the Worker is alive:
 curl https://moviebox-worker.<your-subdomain>.workers.dev/api/health
 curl https://moviebox-worker.<your-subdomain>.workers.dev/api/probe
 curl https://moviebox-worker.<your-subdomain>.workers.dev/
-# → { ok: true, name: "moviebox-worker", version: "5.1.0", routes: [...] }
+# → { ok: true, name: "moviebox-worker", version: "5.2.0", routes: [...] }
 ```
 
 ### 2. Run the front-end
@@ -293,18 +293,24 @@ response carries `X-Response-Source: origin|cache|fallback`.
 |------------------------------------|--------|--------------------------------------------------------|
 | `/api/health`                      | GET    | Worker self-report                                     |
 | `/api/probe`                       | GET    | Round-trips 3 backends, returns per-host latency       |
-| `/api/search?q=&page=`             | GET    | Subject search                                         |
-| `/api/search/v2`                   | POST   | Search v2 (more fields)                                |
+| `/api/search?q=&page=`             | GET    | Subject search (supports resultMode, host pinning)     |
+| `/api/search/v2`                   | POST   | Search v2 (more fields + resultMode/host)              |
 | `/api/search-rank`                 | POST   | Ranked search results                                  |
+| `/api/search-suggest?keyword=`     | GET    | Inline search suggestions                              |
 | `/api/details?id=`                 | GET    | Single subject details                                 |
-| `/api/play-info?id=`               | GET    | Playback metadata (qualities, formats, captions)       |
-| `/api/season-info?id=&season=`     | GET    | TV season listing                                      |
-| `/api/stream?id=&quality=&season=&episode=` | GET | Playable source(s) + signed CloudFront cookies         |
-| `/api/episode?id=&season=&episode=`| GET    | Single episode sources                                 |
+| `/api/play-info?id=&season=&episode=` | GET | Playback metadata (resourceDetectors, streams, signCookie, dubs) |
+| `/api/season-info?id=`             | GET    | TV season listing                                      |
+| `/api/stream?id=&quality=&season=&episode=` | GET | Playable source(s) + signed CloudFront cookies + proxyUrl for DASH |
+| `/api/episode?id=&season=&episode=`| GET    | Single episode sources (alias to stream)               |
 | `/api/subtitle?id=&lang=`          | GET    | Subtitle SRT URL                                       |
-| `/api/stream-captions?id=&season=&episode=` | GET | All available captions for an episode         |
-| `/api/proxy?token=…`               | GET    | DASH manifest + segment proxy with cookie injection    |
+| `/api/stream-captions?id=&streamId=` | GET | All available captions (richer)                       |
+| `/api/proxy?token=…`               | GET    | DASH manifest + segment proxy with cookie injection + MPD rewrite |
 | `/api/mirrors`                     | GET    | List of available upstream hosts                       |
+| `/api/resource?id=...&...`         | GET    | Downloadable resources (full APK params: resolution, se/ep range, pagination, start/endPosition) |
+| `/api/resource-position`           | GET    | Download position/resume info (for download manager)   |
+| `/api/start-download-resource`     | POST   | Start tracking a download (proxied for app downloader) |
+| `/api/finish-download-resource`    | POST   | Finish tracking a download                             |
+| `/api/sniff-config`                | GET    | Sniff/validate download link config                    |
 
 ### Discovery
 
@@ -333,9 +339,12 @@ response carries `X-Response-Source: origin|cache|fallback`.
 | Route                              | Method | Description                                            |
 |------------------------------------|--------|--------------------------------------------------------|
 | `/api/shorts/most-trending`        | POST   | Trending short-form videos                             |
-| `/api/shorts/favorite-list`        | GET    | User-favourited shorts (when auth is wired)           |
+| `/api/shorts/favorite-list`        | GET    | User-favourited shorts                                 |
 | `/api/shorts/get-info?id=`         | GET    | Single short detail                                    |
-| `/api/shorts/mini-list?id=&page=&size=` | GET | Mini-list rail of related shorts                 |
+| `/api/shorts/mini-list?id=&startPosition=&endPosition=` | GET | Mini-list rail (episode rail for short series) |
+| `/api/shorts/dub-info?id=`         | GET    | Available dubs for a short                             |
+| `/api/shorts/get-mini-captions?miniId=` | GET | Mini-captions for short episode (APK-mapped)      |
+| `/api/shorts/operating`            | GET    | Shorts discover/operating sections (banners, ops)      |
 
 ### Cast & crew
 

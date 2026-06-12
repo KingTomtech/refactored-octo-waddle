@@ -35,6 +35,8 @@ export function WidgetSection() {
                   poster={s.poster ?? null}
                   rating={s.rating}
                   year={s.year ?? yearOf((s as any).releaseDate)}
+                  hasResource={(s as any).hasResource}
+                  corner={(s as any).corner}
                 />
               ))}
             </MediaRow>

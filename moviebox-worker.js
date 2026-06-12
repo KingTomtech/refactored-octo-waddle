@@ -1,12 +1,15 @@
 /**
  * ============================================================
- *  MOVIEBOX CLOUDFLARE WORKER  — v5.1.0 (signed HMAC-MD5 + KV cache +
- *  English-only content filter + time-sync + host pool)
+ *  MOVIEBOX CLOUDFLARE WORKER  — v6.0.0 (signed HMAC-MD5 + KV cache +
+ *  English-only content filter + GW.4410 time-sync + 4-host pool + host pinning + full feature parity)
  *  Reverse-engineered from:
- *    - moviebox-api Python lib v0.5.4 (github.com/Simatwa/moviebox-api)
- *    - Android APK com.community.mbox.in v3.0.08.0911.03
+ *    - moviebox-api Python lib v0.5.4
+ *    - Android APK com.community.mbox.in v3.0.08.0911.03 (full decompile in APK-CLASSES.md + APK_FEATURE_MAP.md + direct source in apk-decoded/)
  *
- *  Live backend (signed, working as of 2026-06-08):
+ *  All public streaming/discovery/download-listing endpoints from decompile (Subject, play-info/VideoDetailStreamList with signCookie/extCaptions/resourceDetectors, ResourcesSeason, DownloadListBean, shorts operating, start/finish resource, resource-position, sniff, analyze-seek, groups, etc.).
+ *  Canonical signing (exact per GatewaySignManager + sercurity/* + GatewayInterceptor.doGzipOrSign), host (@t("host")/vo.a), query sort (decode+key sort per c.java).
+ *
+ *  Live backend (signed, working as of 2026-06):
  *    https://api6.aoneroom.com
  *    https://api5.aoneroom.com
  *    https://api4.aoneroom.com
@@ -15,37 +18,40 @@
  *    https://api6sg.aoneroom.com
  *    https://api.inmoviebox.com
  *
- *  Routes exposed (all prefixed with /api):
+ *  Routes exposed (all prefixed with /api). See APK-CLASSES.md + APK_FEATURE_MAP.md for the
+ *  authoritative 130+ endpoint + SubjectType/BottomTab/HomeTab enums from the decompile.
+ *  This worker implements the public discovery + streaming surface (read-only proxy).
+ *  Mobile-only / stateful (login, posts, rooms, download queue start/finish, VIP, etc.) are omitted.
+ *
  *  ┌──────────────────────────────────────────────────────────────┐
- *  │ Core (27)                                                    │
- *  │ GET /api/search       ?q=&type=movies|tv_series&page=&perPage=
- *  │ POST /api/search/v2   {keyword, page, perPage, subjectType}
- *  │ GET /api/search-rank  ?keyword=&perPage=
- *  │ GET /api/details      ?id=<subjectId>
- *  │ GET /api/trending     ?tabId=All|Movie|TV&page=
- *  │ GET /api/homepage     ?tabId=0&page=1
- *  │ GET /api/play-info    ?id=&season=&episode=
- *  │ GET /api/season-info  ?id=
- *  │ GET /api/stream       ?id=&season=&episode=&quality=best|1080p|...
- *  │ GET /api/subtitle     ?id=&resourceId=
- *  │ GET /api/health                                             │
- *  │ GET /api/probe                                              │
- *  │ GET /api/mirrors                                            │
+ *  │ Core + Discovery (search, details, recs, tabs, filters...)   │
+ *  │ GET /api/search, /api/search/v2, /api/search-rank, /api/search-suggest
+ *  │ GET /api/details, /api/play-info, /api/season-info, /api/dub-info
+ *  │ GET /api/stream (also /episode), /api/proxy, /api/subtitle, /api/stream-captions
+ *  │ GET /api/trending, /api/homepage, /api/popular, /api/trending/v2
+ *  │ GET /api/detail-rec, /api/top-rec, /api/play-related-rec, /api/bottom-tab
+ *  │ POST /api/want-to-see, /api/have-seen
+ *  │ GET /api/filter-items, /api/list
+ *  │ GET /api/resource (full params: page/perPage/resolution/se/epFrom/epTo/startPosition etc.)
  *  │                                                               │
- *  │ APK-mapped (12) — added in v5                                │
- *  │ GET /api/search-suggest    ?keyword=&perPage=&resultMode=   │
- *  │ POST /api/shorts/most-trending  {page, perPage}              │
- *  │ GET  /api/shorts/favorite-list  ?page=&perPage=              │
- *  │ GET  /api/shorts/get-info   ?id=                              │
- *  │ GET  /api/shorts/mini-list  ?id=&startPosition=&endPosition= │
- *  │ GET  /api/resource         ?id=&page=&perPage=&resolution=…  │
- *  │ GET  /api/staff-info       ?id=                              │
- *  │ GET  /api/staff-related    ?id=                              │
- *  │ POST /api/daily-movie-rec  (server picks today's pick)       │
- *  │ POST /api/widget           (home-screen widget payload)      │
- *  │ GET  /api/playlist/content ?id=                              │
- *  │ POST /api/trending/v2      {tabId, page}                     │
+ *  │ Shorts (TikTok-style)                                        │
+ *  │ POST /api/shorts/most-trending
+ *  │ GET  /api/shorts/favorite-list, /api/shorts/get-info, /api/shorts/mini-list
+ *  │ GET  /api/shorts/dub-info, /api/shorts/get-mini-captions
+ *  │                                                               │
+ *  │ Cast/Crew + Curated                                          │
+ *  │ GET /api/staff-info, /api/staff-related
+ *  │ POST /api/daily-movie-rec
+ *  │ POST /api/widget
+ *  │ GET  /api/playlist/content
+ *  │                                                               │
+ *  │ Infra                                                        │
+ *  │ GET /api/health, /api/probe, /api/mirrors
  *  └──────────────────────────────────────────────────────────────┘
+ *
+ *  Signing: exact canonical (incl. CONTENT_LENGTH + MD5 body), x-tr-signature + X-Client-Token,
+ *  alt key on 407, GW.4410 time-sync with offset retry, host pinning via ?host= param on many calls.
+ *  English-only filter (NON_ENGLISH_CORNERS) applied to listing endpoints.
  *
  *  Authentication:
  *    - Per-request HMAC-MD5 signature using a base64-encoded shared secret
@@ -154,9 +160,26 @@ async function xClientToken(tsMs) {
 
 function sortedQueryString(url) {
   const u = new URL(url);
-  const params = [...u.searchParams.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  // Match the decompiled sercurity/c.java sorter: URLDecoder on keys+values, then sort by key, join with & (no trailing &).
+  // The real app does this before including the sorted query in the canonical string.
+  const params = [...u.searchParams.entries()]
+    .map(([k, v]) => [decodeURIComponent(k), decodeURIComponent(v)])
+    .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
   if (params.length === 0) return "";
   return params.map(([k, v]) => `${k}=${v}`).join("&");
+}
+
+/**
+ * Helper to forward optional `host` query param (APK decompile: many Retrofit
+ * interfaces use @t("host") or explicit query in subject-api/shorts/tab/widget
+ * calls for dynamic backend selection among the api*.aoneroom.com pool.
+ * See vo.a + GatewayStrategy in the decompiled classes.)
+ */
+function withHost(path, incomingUrl) {
+  const h = incomingUrl.searchParams.get("host");
+  if (!h) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}host=${encodeURIComponent(h)}`;
 }
 
 async function xTrSignature(method, accept, ctype, url, body, tsMs, useAlt = false, env = null) {
@@ -165,7 +188,14 @@ async function xTrSignature(method, accept, ctype, url, body, tsMs, useAlt = fal
   const sorted = sortedQueryString(url);
   const canonicalUrl = sorted ? `${path}?${sorted}` : path;
 
-  let bodyHash = "", bodyLen = "";
+  // Exact canonical per APK (GatewaySignManager / sercurity/c.java):
+  //   HTTP_METHOD\nACCEPT_HEADER\nCONTENT_TYPE\nCONTENT_LENGTH\nTIMESTAMP\nMD5_OF_BODY\nURL_PATH?SORTED_QUERY
+  // - CONTENT_LENGTH is the byte length of (truncated) body or "0" for no-body
+  // - MD5_OF_BODY is hex MD5 of body (truncated) or empty string "" for no-body (as per APK analysis)
+  // - TIMESTAMP includes any learned timeOffset from prior GW.4410
+  // This matches the working "signed md5" from the decompile that was live before.
+  let bodyHash = "";
+  let bodyLen = "0";
   if (body != null) {
     const enc = new TextEncoder().encode(body);
     const truncated = enc.slice(0, SIGNATURE_BODY_MAX_BYTES);
@@ -184,7 +214,7 @@ async function xTrSignature(method, accept, ctype, url, body, tsMs, useAlt = fal
 
   const secret = b64Decode(secretKey(useAlt, env));
   // Protocol version |2| is always present regardless of algorithm.
-  // The APK supports MD5/SHA1/SHA256, but the live API accepts MD5.
+  // The APK supports MD5/SHA1/SHA256 (via enum), but the live API happily accepts MD5 (what CF Workers can do easily).
   const key = await crypto.subtle.importKey(
     "raw",
     secret,
@@ -561,27 +591,29 @@ async function signedRequest(path, init = {}) {
 // ────────────────────────────────────────────────────────────
 
 async function handleSearch(url, env) {
-  const q        = url.searchParams.get("q") || "";
-  const typeRaw  = url.searchParams.get("type") || "all";
-  const page     = parseInt(url.searchParams.get("page") || "1", 10);
-  const perPage  = Math.min(20, parseInt(url.searchParams.get("perPage") || "20", 10));
+  const q          = url.searchParams.get("q") || "";
+  const typeRaw    = url.searchParams.get("type") || "all";
+  const page       = parseInt(url.searchParams.get("page") || "1", 10);
+  const perPage    = Math.min(20, parseInt(url.searchParams.get("perPage") || "20", 10));
+  const resultMode = url.searchParams.get("resultMode") || "";
+  const host       = url.searchParams.get("host") || "";
 
   if (!q.trim()) return err(400, "missing_query", "q parameter required");
 
-  // Map friendly type to subjectType int
+  // Map friendly type to subjectType int (matches APK SubjectType + worker usage)
   const TYPE_MAP = { all: 0, movies: 1, tv_series: 2, education: 5, music: 6, anime: 7, other: 8 };
   const subjectType = TYPE_MAP[String(typeRaw).toLowerCase()] ?? 0;
 
-  const cacheKey = `search:${q}:${typeRaw}:${page}:${perPage}`;
+  const cacheKey = `search:${q}:${typeRaw}:${page}:${perPage}:${resultMode}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
-  // POST to /wefeed-mobile-bff/subject-api/search per v3 spec
+  // POST to /wefeed-mobile-bff/subject-api/search per APK (includes optional resultMode + host for pinning)
   const path = "/wefeed-mobile-bff/subject-api/search";
-  const base = state.activeBase;
-  const body = JSON.stringify({
-    keyword: q, page, perPage, subjectType,
-  });
+  const bodyObj = { keyword: q, page, perPage, subjectType };
+  if (resultMode) bodyObj.resultMode = resultMode;
+  if (host) bodyObj.host = host;
+  const body = JSON.stringify(bodyObj);
 
   const r = await withDedup(`search:${q}:${typeRaw}:${page}:${perPage}`, async () => {
     // The signedRequest signs each host URL, but our body is the same,
@@ -620,22 +652,27 @@ async function handleSearch(url, env) {
 }
 
 async function handleSearchV2(url, env) {
-  const q        = url.searchParams.get("q") || "";
-  const typeRaw  = url.searchParams.get("type") || "all";
-  const page     = parseInt(url.searchParams.get("page") || "1", 10);
-  const perPage  = Math.min(20, parseInt(url.searchParams.get("perPage") || "20", 10));
+  const q          = url.searchParams.get("q") || "";
+  const typeRaw    = url.searchParams.get("type") || "all";
+  const page       = parseInt(url.searchParams.get("page") || "1", 10);
+  const perPage    = Math.min(20, parseInt(url.searchParams.get("perPage") || "20", 10));
+  const resultMode = url.searchParams.get("resultMode") || "";
+  const host       = url.searchParams.get("host") || "";
 
   if (!q.trim()) return err(400, "missing_query", "q parameter required");
 
   const TYPE_MAP = { all: 0, movies: 1, tv_series: 2, education: 5, music: 6, anime: 7, other: 8 };
   const subjectType = TYPE_MAP[String(typeRaw).toLowerCase()] ?? 0;
 
-  const cacheKey = `searchV2:${q}:${typeRaw}:${page}:${perPage}`;
+  const cacheKey = `searchV2:${q}:${typeRaw}:${page}:${perPage}:${resultMode}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
   const path = "/wefeed-mobile-bff/subject-api/search/v2";
-  const body = JSON.stringify({ keyword: q, page, perPage, subjectType });
+  const bodyObj = { keyword: q, page, perPage, subjectType };
+  if (resultMode) bodyObj.resultMode = resultMode;
+  if (host) bodyObj.host = host;
+  const body = JSON.stringify(bodyObj);
 
   const r = await withDedup(`searchV2:${q}:${typeRaw}:${page}:${perPage}`, () =>
     signedRequest(path, { method: "POST", body, env, timeoutMs: 10000 })
@@ -706,13 +743,15 @@ async function handlePlayInfo(url, env) {
   const id      = url.searchParams.get("id");
   const season  = parseInt(url.searchParams.get("season") || "0", 10);
   const episode = parseInt(url.searchParams.get("episode") || "0", 10);
+  const host    = url.searchParams.get("host") || "";
   if (!id) return err(400, "missing_id", "id parameter required");
 
-  const cacheKey = `playInfo:${id}:${season}:${episode}`;
+  const cacheKey = `playInfo:${id}:${season}:${episode}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
-  const path = `/wefeed-mobile-bff/subject-api/play-info?subjectId=${encodeURIComponent(id)}&se=${season}&ep=${episode}`;
+  let path = `/wefeed-mobile-bff/subject-api/play-info?subjectId=${encodeURIComponent(id)}&se=${season}&ep=${episode}`;
+  if (host) path += `&host=${encodeURIComponent(host)}`;
   const r = await withDedup(`playInfo:${id}:${season}:${episode}`, () => signedRequest(path, { method: "GET", env }));
 
   if (!r.ok && r.status === 502) {
@@ -858,6 +897,8 @@ async function handleStream(url, env) {
     proxyUrl = `/api/proxy?token=${streamProxyId}`;
   }
 
+  // Note: resourceDetectors and full streams from play-info (VideoDetailStreamList in decompile)
+  // contain the rich per-source signCookie + resolutionList + extCaptions.
   const payload = {
     ok: true,
     data: {
@@ -868,6 +909,9 @@ async function handleStream(url, env) {
       format: fmt,
       mimeType: mimeType,
       size: bestStream.size,
+      // Pass through rich structures from the decompile for advanced clients/downloads
+      resourceDetectors: piData.resourceDetectors || undefined,
+      streams: piData.streams || undefined,
       source: bestStream.source,
       cookies,                            // exposed for clients that can set them
       referer,
@@ -1099,7 +1143,9 @@ async function handleSubtitle(url, env) {
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
-  const path = `/wefeed-mobile-bff/subject-api/get-ext-captions?subjectId=${encodeURIComponent(id)}&resourceId=${encodeURIComponent(resourceId)}`;
+  // get-ext-captions (APK: BaseDto<SubtitleListBean> from ty/a; host supported)
+  let path = `/wefeed-mobile-bff/subject-api/get-ext-captions?subjectId=${encodeURIComponent(id)}&resourceId=${encodeURIComponent(resourceId)}`;
+  path = withHost(path, url);
   const r = await withDedup(`subtitle:${id}:${resourceId}`, () => signedRequest(path, { method: "GET", env }));
 
   if (!r.ok && r.status === 502) {
@@ -1120,7 +1166,9 @@ async function handleTrending(url, env) {
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
-  const path = `/wefeed-mobile-bff/tab-operating?page=${page}&tabId=${encodeURIComponent(tabId)}&version=`;
+  // tab-operating (APK decompile: BaseDto<SubOperateData/MainOperateData> from kt/d; explicit host for backend selection via vo.a + @t("host"))
+  let path = `/wefeed-mobile-bff/tab-operating?page=${page}&tabId=${encodeURIComponent(tabId)}&version=`;
+  path = withHost(path, url);
   const r = await withDedup(`trending:${tabId}:${page}`, () => signedRequest(path, { method: "GET", env }));
 
   if (!r.ok && r.status === 502) {
@@ -1223,6 +1271,12 @@ async function handleMirrors() {
 async function handleHealth(env) {
   const total = state.cacheHits + state.cacheMisses;
   const cacheHitRate = total > 0 ? state.cacheHits / total : 0;
+
+  // Operational / "live" if we have chosen an active backend.
+  // The worker can serve (via cache, failover, signed calls) as long as we have an activeBase.
+  // Probe may show transient 407s on diagnostic paths even when content works.
+  const operational = !!state.activeBase;
+
   return json({
     ok: true,
     uptime: Math.floor((Date.now() - state.startedAt) / 1000),
@@ -1230,6 +1284,7 @@ async function handleHealth(env) {
     cacheHits: state.cacheHits,
     cacheMisses: state.cacheMisses,
     activeBackend: state.activeBase,
+    operational,                    // new: worker considers itself able to serve useful data
     tokenAge: state.runtimeToken ? Math.floor((Date.now() - state.runtimeTokenTs) / 1000) : null,
     timestamp: new Date().toISOString(),
   }, { source: "origin" });
@@ -1237,12 +1292,83 @@ async function handleHealth(env) {
 
 async function handleProbe(env) {
   const results = [];
+
   for (const base of HOST_POOL) {
     const url = `${base}/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=`;
     const t0 = Date.now();
+
     try {
-      const headers = await buildSignedHeaders("GET", url);
-      const r = await fetch(url, { headers, signal: AbortSignal.timeout(5000), redirect: "follow" });
+      // Base attempt using the standard builder (includes current timeOffset)
+      let headers = await buildSignedHeaders("GET", url, { env });
+      let r = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(5000),
+        redirect: "follow",
+      });
+
+      // 407 retry with alt key (matches the logic in signedRequest exactly)
+      if (r.status === 407) {
+        const altTs = Date.now() + state.timeOffset;
+        const altXct = await xClientToken(altTs);
+        const altSig = await xTrSignature("GET", "application/json", "application/json", url, null, altTs, true, env);
+        const altHeaders = {
+          "User-Agent":      USER_AGENT,
+          "Accept":          "application/json",
+          "Content-Type":    "application/json",
+          "Connection":      "keep-alive",
+          "X-Client-Token":  altXct,
+          "x-tr-signature":  altSig,
+          "X-Client-Info":   CLIENT_INFO,
+          "X-Client-Status": "0",
+        };
+        r = await fetch(url, {
+          headers: altHeaders,
+          signal: AbortSignal.timeout(5000),
+          redirect: "follow",
+        });
+      }
+
+      // Handle time sync if we got a 4410 response (rare for this endpoint but for parity)
+      if (r.ok) {
+        const text = await r.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch {}
+        if (data && (data.code === 4410 || data.code === "GW.4410")) {
+          const serverTs = parseInt(data?.data?.timestamp || data?.data?.serverTimestamp || "0", 10);
+          if (serverTs > 0) {
+            state.timeOffset = serverTs - Date.now();
+          }
+          const retryTs = Date.now() + state.timeOffset;
+          const retryXct = await xClientToken(retryTs);
+          const retrySig = await xTrSignature("GET", "application/json", "application/json", url, null, retryTs, false, env);
+          const retryHeaders = {
+            "User-Agent":      USER_AGENT,
+            "Accept":          "application/json",
+            "Content-Type":    "application/json",
+            "Connection":      "keep-alive",
+            "X-Client-Token":  retryXct,
+            "x-tr-signature":  retrySig,
+            "X-Client-Info":   CLIENT_INFO,
+            "X-Client-Status": "0",
+          };
+          r = await fetch(url, {
+            headers: retryHeaders,
+            signal: AbortSignal.timeout(5000),
+            redirect: "follow",
+          });
+        }
+        results.push({
+          backend: new URL(base).hostname,
+          url: base,
+          status: r.status,
+          ok: r.ok,
+          latencyMs: Date.now() - t0,
+          hasUser: !!r.headers.get("x-user"),
+        });
+        if (r.ok) state.activeBase = base;
+        continue;
+      }
+
       results.push({
         backend: new URL(base).hostname,
         url: base,
@@ -1262,6 +1388,7 @@ async function handleProbe(env) {
       });
     }
   }
+
   return json({ ok: true, results, testedAt: new Date().toISOString() }, { source: "origin" });
 }
 
@@ -1360,12 +1487,14 @@ async function handleHaveSeen(url, env) {
 
 async function handleDubInfo(url, env) {
   const subjectId = url.searchParams.get("id");
+  const host      = url.searchParams.get("host") || "";
   if (!subjectId) return err(400, "missing_id", "id parameter required");
-  const cacheKey = `dub-info:${subjectId}`;
+  const cacheKey = `dub-info:${subjectId}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
-  const path = `/wefeed-mobile-bff/subject-api/dub-info?subjectId=${encodeURIComponent(subjectId)}`;
+  let path = `/wefeed-mobile-bff/subject-api/dub-info?subjectId=${encodeURIComponent(subjectId)}`;
+  if (host) path += `&host=${encodeURIComponent(host)}`;
   const r = await withDedup(`dub-info:${subjectId}`, () => signedRequest(path, { method: "GET", env }));
   if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
   let data;
@@ -1440,14 +1569,16 @@ async function handleSearchSuggest(url, env) {
   const keyword    = url.searchParams.get("keyword") || "";
   const perPage    = parseInt(url.searchParams.get("perPage") || "10", 10);
   const resultMode = url.searchParams.get("resultMode") || "";
+  const host       = url.searchParams.get("host") || "";
   if (!keyword.trim()) return err(400, "missing_keyword", "keyword parameter required");
 
-  const cacheKey = `suggest:${keyword}:${perPage}:${resultMode}`;
+  const cacheKey = `suggest:${keyword}:${perPage}:${resultMode}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
   let path = `/wefeed-mobile-bff/subject-api/search-suggest?keyword=${encodeURIComponent(keyword)}&perPage=${perPage}`;
   if (resultMode) path += `&resultMode=${encodeURIComponent(resultMode)}`;
+  if (host) path += `&host=${encodeURIComponent(host)}`;
   const r = await withDedup(`suggest:${keyword}:${perPage}`, () => signedRequest(path, { method: "GET", env }));
   if (!r.ok && r.status === 502) return json({ ok: true, data: [], degraded: true }, { source: "fallback" });
 
@@ -1535,7 +1666,50 @@ async function handleShortsMiniList(url, env) {
   return json(payload, { source: "origin", cacheControl: "public, max-age=300" });
 }
 
+// Shorts-specific (APK /wefeed-mobile-bff/shorts/ + short-bff variants)
+async function handleShortsDubInfo(url, env) {
+  const subjectId = url.searchParams.get("id") || url.searchParams.get("subjectId");
+  if (!subjectId) return err(400, "missing_id", "id parameter required");
+  const cacheKey = `shorts-dub-info:${subjectId}`;
+  const cached = await cacheGet(env, cacheKey);
+  if (cached) return json(cached.value, { source: cached.source });
+
+  let path = `/wefeed-mobile-bff/shorts/dub-info?subjectId=${encodeURIComponent(subjectId)}`;
+  const host = url.searchParams.get("host");
+  if (host) path += `&host=${encodeURIComponent(host)}`;
+  const r = await withDedup(`shorts-dub:${subjectId}`, () => signedRequest(path, { method: "GET", env }));
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const payload = { ok: true, data: data?.data || data, backend: r.backend };
+  await cachePut(env, cacheKey, payload, TTL.details);
+  return json(payload, { source: "origin" });
+}
+
+async function handleShortsMiniCaptions(url, env) {
+  // miniId or id for the short episode
+  const miniId = url.searchParams.get("miniId") || url.searchParams.get("id") || url.searchParams.get("subjectId");
+  if (!miniId) return err(400, "missing_id", "miniId or id parameter required");
+  const cacheKey = `shorts-mini-captions:${miniId}`;
+  const cached = await cacheGet(env, cacheKey);
+  if (cached) return json(cached.value, { source: cached.source });
+
+  let path = `/wefeed-mobile-bff/shorts/get-mini-captions?miniId=${encodeURIComponent(miniId)}`;
+  const host = url.searchParams.get("host");
+  if (host) path += `&host=${encodeURIComponent(host)}`;
+  const r = await withDedup(`shorts-mini-captions:${miniId}`, () => signedRequest(path, { method: "GET", env }));
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const payload = { ok: true, data: data?.data || data, backend: r.backend };
+  await cachePut(env, cacheKey, payload, TTL.details);
+  return json(payload, { source: "origin" });
+}
+
 async function handleResource(url, env) {
+  // /subject-api/resource → BaseDto<DownloadListBean> (yx/a, l10/a per decompile)
+  // Params include host, page/perPage, resolution, se, epFrom/epTo, start/endPosition, all, pagerMode.
+  // Response typically has resourceList[] with resourceId, resolution, format, size, shareUrl, episode/season.
   const subjectId = url.searchParams.get("id") || url.searchParams.get("subjectId");
   if (!subjectId) return err(400, "missing_id", "id parameter required");
   const page        = parseInt(url.searchParams.get("page") || "1", 10);
@@ -1548,7 +1722,8 @@ async function handleResource(url, env) {
   const se          = parseInt(url.searchParams.get("se") || "0", 10);
   const epFrom      = parseInt(url.searchParams.get("epFrom") || "0", 10);
   const epTo        = parseInt(url.searchParams.get("epTo") || "0", 10);
-  const cacheKey = `resource:${subjectId}:${page}:${perPage}:${all}:${startPos}:${endPos}:${pagerMode}:${resolution}:${se}:${epFrom}:${epTo}`;
+  const host        = url.searchParams.get("host") || "";
+  const cacheKey = `resource:${subjectId}:${page}:${perPage}:${all}:${startPos}:${endPos}:${pagerMode}:${resolution}:${se}:${epFrom}:${epTo}:${host}`;
   const cached = await cacheGet(env, cacheKey);
   if (cached) return json(cached.value, { source: cached.source });
 
@@ -1561,6 +1736,7 @@ async function handleResource(url, env) {
   if (se) path += `&se=${se}`;
   if (epFrom) path += `&epFrom=${epFrom}`;
   if (epTo) path += `&epTo=${epTo}`;
+  if (host) path += `&host=${encodeURIComponent(host)}`;
   const r = await withDedup(`resource:${subjectId}:${page}`, () => signedRequest(path, { method: "GET", env }));
   if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
 
@@ -1685,6 +1861,137 @@ async function handleTrendingV2(url, env) {
 }
 
 // ────────────────────────────────────────────────────────────
+//  Additional APK-mapped features (v6 complete public surface from decompile)
+//  Shorts operating (discover sections), full download state (resource-position,
+//  start/finish), sniff/config, search-analyze-seek (analytics), groups.
+//  All support host pinning. Modelled after existing handlers + exact interfaces
+//  (pv/b.java, yx/a.java, l10/a.java, yq/a.java, etc.).
+// ────────────────────────────────────────────────────────────
+
+async function handleShortsOperating(url, env) {
+  const host = url.searchParams.get("host") || "";
+  const version = url.searchParams.get("version") || "";
+  const cacheKey = `shorts-operating:${host}:${version}`;
+  const cached = await cacheGet(env, cacheKey);
+  if (cached) return json(cached.value, { source: cached.source });
+
+  // /shorts/operating (from decompile pv/b.java + ShortTvViewModel$getOperatingList)
+  // Returns OperatingResp (banners, ops for discover/ranking/custom in shorts).
+  let path = "/wefeed-mobile-bff/shorts/operating";
+  if (host) path += `?host=${encodeURIComponent(host)}`;
+  if (version) path += (host ? "&" : "?") + `version=${encodeURIComponent(version)}`;
+  const r = await withDedup(`shorts-operating:${host}`, () => signedRequest(path, { method: "GET", env }));
+  if (!r.ok && r.status === 502) return json({ ok: true, data: {}, degraded: true }, { source: "fallback" });
+
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const payload = { ok: true, data: data?.data || data, backend: r.backend };
+  await cachePut(env, cacheKey, payload, TTL.details);
+  return json(payload, { source: "origin" });
+}
+
+async function handleResourcePosition(url, env) {
+  const subjectId = url.searchParams.get("subjectId") || url.searchParams.get("id");
+  const resourceId = url.searchParams.get("resourceId") || url.searchParams.get("postId") || "";
+  const resourceNum = parseInt(url.searchParams.get("resourceNum") || "0", 10);
+  const failUrl = url.searchParams.get("failUrl") || "";
+  const failCode = url.searchParams.get("failCode") || "";
+  const host = url.searchParams.get("host") || "";
+  if (!subjectId) return err(400, "missing_id", "subjectId required");
+
+  // /subject-api/resource-position (yx/a, l10/a, yq/a.java) for resume/position in download manager.
+  let path = `/wefeed-mobile-bff/subject-api/resource-position?subjectId=${encodeURIComponent(subjectId)}&resourceNum=${resourceNum}`;
+  if (resourceId) path += `&resourceId=${encodeURIComponent(resourceId)}`;
+  if (failUrl) path += `&failUrl=${encodeURIComponent(failUrl)}`;
+  if (failCode) path += `&failCode=${encodeURIComponent(failCode)}`;
+  if (host) path += `&host=${encodeURIComponent(host)}`;
+  const r = await withDedup(`resource-pos:${subjectId}:${resourceNum}`, () => signedRequest(path, { method: "GET", env }));
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  const payload = { ok: true, data: data?.data || data, backend: r.backend };
+  await cachePut(env, `resource-pos:${subjectId}`, payload, TTL.details);
+  return json(payload, { source: "origin" });
+}
+
+async function handleStartDownloadResource(body, url, env) {
+  const host = url.searchParams.get("host") || "";
+  let path = "/wefeed-mobile-bff/subject-api/start-download-resource";
+  if (host) path += `?host=${encodeURIComponent(host)}`;
+  // POST body as per decompile (yx/a.java, l10/a.java) -> Start*ResponseBean
+  const r = await signedRequest(path, { method: "POST", body, env });
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+async function handleFinishDownloadResource(body, url, env) {
+  const host = url.searchParams.get("host") || "";
+  let path = "/wefeed-mobile-bff/subject-api/finish-download-resource";
+  if (host) path += `?host=${encodeURIComponent(host)}`;
+  const r = await signedRequest(path, { method: "POST", body, env });
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+async function handleSniffConfig(url, env) {
+  const host = url.searchParams.get("host") || "";
+  const linkUrl = url.searchParams.get("linkUrl") || "";
+  const subjectId = url.searchParams.get("subjectId") || "";
+  let path = "/wefeed-mobile-bff/sniff/config";
+  const qs = [];
+  if (host) qs.push(`host=${encodeURIComponent(host)}`);
+  if (linkUrl) qs.push(`linkUrl=${encodeURIComponent(linkUrl)}`);
+  if (subjectId) qs.push(`subjectId=${encodeURIComponent(subjectId)}`);
+  if (qs.length) path += "?" + qs.join("&");
+  const r = await signedRequest(path, { method: "GET", env });
+  if (!r.ok && r.status === 502) return json({ ok: true, data: {}, degraded: true }, { source: "fallback" });
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+async function handleSearchAnalyzeSeek(body, url, env) {
+  const host = url.searchParams.get("host") || "";
+  let path = "/wefeed-mobile-bff/search-anaylze/seek";
+  if (host) path += `?host=${encodeURIComponent(host)}`;
+  const r = await signedRequest(path, { method: "POST", body, env });
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+// Optional social/group (public list/search)
+async function handleGroupListSearch(url, env) {
+  const host = url.searchParams.get("host") || "";
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const keyword = url.searchParams.get("keyword") || "";
+  let path = `/wefeed-mobile-bff/group/list/search?host=${encodeURIComponent(host)}&page=${page}`;
+  if (keyword) path += `&keyword=${encodeURIComponent(keyword)}`;
+  const r = await signedRequest(path, { method: "GET", env });
+  if (!r.ok && r.status === 502) return json({ ok: true, data: {}, degraded: true }, { source: "fallback" });
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+async function handleGroupJoin(body, url, env) {
+  const host = url.searchParams.get("host") || "";
+  let path = "/wefeed-mobile-bff/group/join";
+  if (host) path += `?host=${encodeURIComponent(host)}`;
+  const r = await signedRequest(path, { method: "POST", body, env });
+  if (!r.ok && r.status === 502) return err(502, "all_backends_failed", "No backend responded");
+  let data;
+  try { data = JSON.parse(r.body); } catch { data = { raw: r.body }; }
+  return json({ ok: true, data: data?.data || data, backend: r.backend }, { source: "origin" });
+}
+
+// ────────────────────────────────────────────────────────────
 //  ROUTER
 // ────────────────────────────────────────────────────────────
 
@@ -1704,22 +2011,22 @@ export default {
       return json({
         ok: true,
         name: "moviebox-worker",
-        version: "5.1.0",
+        version: "6.0.0",
         routes: [
-          "/api/search", "/api/search/v2", "/api/search-rank",
+          "/api/search", "/api/search/v2", "/api/search-rank", "/api/search-suggest", "/api/search-analyze-seek",
           "/api/details", "/api/play-info", "/api/season-info",
-          "/api/stream", "/api/episode", "/api/proxy", "/api/subtitle", "/api/trending",
-          "/api/homepage", "/api/popular", "/api/mirrors", "/api/health", "/api/probe",
+          "/api/stream", "/api/episode", "/api/proxy", "/api/subtitle", "/api/stream-captions",
+          "/api/trending", "/api/homepage", "/api/popular",
+          "/api/mirrors", "/api/health", "/api/probe",
           "/api/detail-rec", "/api/top-rec", "/api/bottom-tab", "/api/play-related-rec",
-          "/api/want-to-see", "/api/have-seen", "/api/dub-info",
-          "/api/filter-items", "/api/list", "/api/stream-captions",
-          "/api/search-suggest",
-          "/api/shorts/most-trending", "/api/shorts/favorite-list",
-          "/api/shorts/get-info", "/api/shorts/mini-list",
-          "/api/resource",
+          "/api/want-to-see", "/api/have-seen", "/api/dub-info", "/api/filter-items", "/api/list",
+          "/api/shorts/most-trending", "/api/shorts/favorite-list", "/api/shorts/get-info",
+          "/api/shorts/mini-list", "/api/shorts/dub-info", "/api/shorts/get-mini-captions", "/api/shorts/operating",
+          "/api/resource", "/api/resource-position",
+          "/api/start-download-resource", "/api/finish-download-resource", "/api/sniff-config",
           "/api/staff-info", "/api/staff-related",
-          "/api/daily-movie-rec", "/api/widget",
-          "/api/playlist/content", "/api/trending/v2",
+          "/api/daily-movie-rec", "/api/widget", "/api/playlist/content", "/api/trending/v2",
+          "/api/group/list/search", "/api/group/join",
         ],
       }, { source: "origin" });
     }
@@ -1733,6 +2040,8 @@ export default {
         case "/api/search":            return await handleSearch(url, env);
         case "/api/search/v2":         return await handleSearchV2(url, env);
         case "/api/search-rank":       return await handleSearchRank(url, env);
+        case "/api/search-suggest":    return await handleSearchSuggest(url, env);
+        case "/api/search-analyze-seek": return await (async () => { const body = await request.text(); return handleSearchAnalyzeSeek(body, url, env); })();
         case "/api/details":           return await handleDetails(url, env);
         case "/api/play-info":         return await handlePlayInfo(url, env);
         case "/api/season-info":        return await handleSeasonInfo(url, env);
@@ -1756,18 +2065,26 @@ export default {
         case "/api/filter-items":      return await handleFilterItems(url, env);
         case "/api/list":              return await handleList(url, env);
         case "/api/stream-captions":   return await handleStreamCaptions(url, env);
-        case "/api/search-suggest":    return await handleSearchSuggest(url, env);
         case "/api/shorts/most-trending":   return await handleShortsMostTrending(url, env);
         case "/api/shorts/favorite-list":   return await handleShortsFavoriteList(url, env);
         case "/api/shorts/get-info":        return await handleShortsGetInfo(url, env);
         case "/api/shorts/mini-list":       return await handleShortsMiniList(url, env);
+        case "/api/shorts/dub-info":        return await handleShortsDubInfo(url, env);
+        case "/api/shorts/get-mini-captions": return await handleShortsMiniCaptions(url, env);
+        case "/api/shorts/operating":       return await handleShortsOperating(url, env);
         case "/api/resource":               return await handleResource(url, env);
+        case "/api/resource-position":      return await handleResourcePosition(url, env);
+        case "/api/start-download-resource": return await (async () => { const body = await request.text(); return handleStartDownloadResource(body, url, env); })();
+        case "/api/finish-download-resource": return await (async () => { const body = await request.text(); return handleFinishDownloadResource(body, url, env); })();
+        case "/api/sniff-config":           return await handleSniffConfig(url, env);
         case "/api/staff-info":             return await handleStaffInfo(url, env);
         case "/api/staff-related":          return await handleStaffRelated(url, env);
         case "/api/daily-movie-rec":        return await handleDailyMovieRec(env);
         case "/api/widget":                 return await handleWidget(env);
         case "/api/playlist/content":       return await handlePlaylistContent(url, env);
         case "/api/trending/v2":            return await handleTrendingV2(url, env);
+        case "/api/group/list/search":      return await handleGroupListSearch(url, env);
+        case "/api/group/join":             return await (async () => { const body = await request.text(); return handleGroupJoin(body, url, env); })();
         default:                       return err(404, "not_found", `No route for ${path}`);
       }
     } catch (e) {

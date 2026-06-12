@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Film, Tv } from 'lucide-react';
-import { useWorkerHomepage } from '@/hooks/useSearch';
+import { useWorkerHomepage, useWorkerFilterItems } from '@/hooks/useSearch';
 import { MediaCard, MediaCardSkeleton } from '@/components/MediaCard';
 import { cn, yearOf } from '@/lib/utils';
 
@@ -30,6 +30,7 @@ export default function BrowseClient() {
   const [type, setType] = useState<Type>((params.get('type') as Type) || 'movie');
 
   const homepage = useWorkerHomepage();
+  const filters = useWorkerFilterItems(type === 'tv' ? '2' : '1');
 
   // URL sync
   useEffect(() => {
@@ -43,14 +44,16 @@ export default function BrowseClient() {
     ? (homepage.data!.data as RawSubject[])
     : [];
 
+  const filterItems = filters.data?.data ?? [];
+
   const items = type === 'tv' ? all.filter(isTv) : all.filter((s) => !isTv(s));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       <h1 className="font-display text-3xl tracking-wide mb-4">Browse</h1>
 
-      {/* Type toggle */}
-      <div className="flex items-center gap-2 mb-6">
+      {/* Type toggle + filters from /api/filter-items (genres/years per decompile) */}
+      <div className="flex items-center gap-2 mb-3">
         <button
           onClick={() => setType('movie')}
           className={cn('chip', type === 'movie' && 'chip-active')}
@@ -64,6 +67,9 @@ export default function BrowseClient() {
           <Tv size={14} /> Series
         </button>
       </div>
+      {filterItems.length > 0 && (
+        <div className="text-[10px] text-text-muted mb-4 flex gap-2 flex-wrap">Filters: {filterItems.slice(0,4).map((f: any) => f.name).join(' · ')} …</div>
+      )}
 
       {/* Results */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -77,6 +83,8 @@ export default function BrowseClient() {
             poster={s.cover?.url ?? null}
             rating={s.imdbRatingValue ? Number(s.imdbRatingValue) : undefined}
             year={s.releaseDate ? yearOf(s.releaseDate) : undefined}
+            hasResource={(s as any).hasResource}
+            corner={(s as any).corner}
           />
         ))}
         {!homepage.isLoading && items.length === 0 && (

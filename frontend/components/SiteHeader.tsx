@@ -7,6 +7,7 @@ import { SearchBar } from './SearchBar';
 import { Swords, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useWorkerHealth, useWorkerProbe } from '@/hooks/useSearch';
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -31,6 +32,7 @@ export function SiteHeader() {
           <span className="hidden md:block text-[9px] text-text-muted tracking-widest uppercase mt-1.5">
             Maximum Effort Streaming
           </span>
+          <BackendLiveDot />
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
@@ -109,5 +111,32 @@ export function SiteHeader() {
         )}
       </AnimatePresence>
     </header>
+  );
+}
+
+// Small persistent "live" indicator (green dot) so the healthy state is always visible in the header
+function BackendLiveDot() {
+  const health = useWorkerHealth({ refetchInterval: 120_000 });
+  const probe = useWorkerProbe({ refetchInterval: 120_000 });
+
+  const hasActive = !!health.data?.activeBackend;
+  const workerOk = !!health.data?.ok;
+
+  if (!workerOk && !probe.data) return null;
+
+  // Green LIVE if worker has active backend (backends can be fine; the worker proxy is what unifies + caches + filters).
+  // This prevents the "everything stops" feel when the banner or dot goes yellow due to probe noise.
+  const isGreen = hasActive || workerOk;
+  const color = isGreen ? 'bg-emerald-400' : 'bg-yellow-400';
+  const label = isGreen ? 'LIVE' : 'degraded';
+
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] tracking-widest text-text-muted"
+      title={health.data?.activeBackend ? `active: ${new URL(health.data.activeBackend).hostname}` : 'backend status'}
+    >
+      <span className={cn('inline-block h-1.5 w-1.5 rounded-full', color)} />
+      {label}
+    </span>
   );
 }

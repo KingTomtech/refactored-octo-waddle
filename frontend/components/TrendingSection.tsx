@@ -63,6 +63,8 @@ export function TrendingSection() {
             {tab.label}
           </button>
         ))}
+        {/* Live/Sports hint from decompile (SportLiveProvider / LiveListItem in home operate) */}
+        <span className="text-[10px] text-accent ml-1">Live in tabs/operating where present</span>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -81,6 +83,8 @@ export function TrendingSection() {
             poster={s.poster ?? (s as any).cover?.url ?? null}
             rating={s.rating}
             year={s.year ?? yearOf((s as any).releaseDate)}
+            hasResource={(s as any).hasResource}
+            corner={(s as any).corner}
           />
         ))}
       </div>

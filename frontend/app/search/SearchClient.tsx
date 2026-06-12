@@ -2,8 +2,8 @@
 
 import { useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Search as SearchIcon, X, Film, Tv } from 'lucide-react';
-import { useWorkerSearch } from '@/hooks/useSearch';
+import { Search as SearchIcon, X, Film, Tv, Flame } from 'lucide-react';
+import { useWorkerSearch, useWorkerSearchSuggest, useWorkerSearchRank } from '@/hooks/useSearch';
 import { useDebounce } from '@/hooks/useDebounce';
 import { MediaCard, MediaCardSkeleton } from '@/components/MediaCard';
 import { SearchBar } from '@/components/SearchBar';
@@ -25,6 +25,8 @@ export default function SearchClient() {
 
   const debouncedQ = useDebounce(initialQ, 300);
   const workerQ = useWorkerSearch(debouncedQ);
+  const suggest = useWorkerSearchSuggest(debouncedQ);
+  const hotRank = useWorkerSearchRank('');
 
   const workerResults: WorkerSearchResult[] = useMemo(() => {
     const list = workerQ.data?.data ?? [];
@@ -32,6 +34,9 @@ export default function SearchClient() {
     if (filter === 'tv') return list.filter((i) => subjectTypeToRoute((i as any).subjectType) === 'tv');
     return list;
   }, [workerQ.data, filter]);
+
+  const hotKeywords = (hotRank.data?.data ?? []).slice(0, 8);
+  const suggests = (suggest.data?.data ?? []).slice(0, 6);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
@@ -58,13 +63,25 @@ export default function SearchClient() {
         )}
       </div>
 
-      {/* Empty state (no query) */}
+      {/* Empty state (no query) + hot from /api/search-rank */}
       {!debouncedQ && (
-        <div className="flex flex-col items-center justify-center py-20 text-center text-text-muted">
+        <div className="flex flex-col items-center justify-center py-12 text-center text-text-muted">
           <SearchIcon size={48} className="mb-3" />
           <p className="text-lg">Type something to start searching</p>
-          <p className="text-sm mt-1">Try &ldquo;Inception&rdquo;, &ldquo;Breaking Bad&rdquo;, or your favourite actor.</p>
+          {hotKeywords.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2 justify-center max-w-xl">
+              {hotKeywords.map((k: any, i: number) => (
+                <span key={i} className="chip text-xs inline-flex items-center gap-1"><Flame size={11} />{k.keyword}</span>
+              ))}
+            </div>
+          )}
+          <p className="text-sm mt-3">Try &ldquo;Inception&rdquo;, &ldquo;Breaking Bad&rdquo;, or your favourite actor.</p>
         </div>
+      )}
+
+      {/* Suggest as you type (search-suggest) */}
+      {debouncedQ && suggests.length > 0 && !workerQ.isLoading && (
+        <div className="mb-4 text-xs text-text-muted">Suggestions: {suggests.map((s: any) => s.keyword).join(' · ')}</div>
       )}
 
       {/* Results */}
@@ -99,6 +116,8 @@ export default function SearchClient() {
                     poster={item.poster ?? null}
                     rating={item.rating}
                     year={item.year ?? yearOf((item as any).releaseDate)}
+                    hasResource={(item as any).hasResource}
+                    corner={(item as any).corner}
                   />
                 ))}
               </div>

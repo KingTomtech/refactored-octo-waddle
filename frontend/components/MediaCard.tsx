@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import { cn, ratingColor } from '@/lib/utils';
 import type { MediaCardProps } from '@/lib/types';
 
-export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }: MediaCardProps) {
+export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay, corner, hasResource }: MediaCardProps & { corner?: string; hasResource?: boolean }) {
   const router = useRouter();
   const [loaded, setLoaded] = useState(false);
   const [hover, setHover] = useState(false);
@@ -58,10 +58,12 @@ export function MediaCard({ id, type, title, poster, rating, year, onQuickPlay }
       )}
 
       {/* Type badge */}
-      <div className="absolute top-2 left-2 z-10">
+      <div className="absolute top-2 left-2 z-10 flex flex-col gap-1">
         <span className={type === 'movie' ? 'badge-movie' : 'badge-series'}>
           {type === 'movie' ? 'Movie' : 'Series'}
         </span>
+        {corner && <span className="text-[9px] px-1 py-0 bg-white/80 text-black rounded">{corner}</span>}
+        {hasResource && <span className="text-[9px] px-1 py-0 bg-accent/80 text-white rounded">DL</span>}
       </div>
 
       {/* Rating badge */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useWorkerHomepage } from '@/hooks/useSearch';
+import { useWorkerHomepage, useWorkerBottomTab } from '@/hooks/useSearch';
 import { MediaCard, MediaCardSkeleton } from '@/components/MediaCard';
 import { MediaRow } from '@/components/MediaRow';
 import { HeroSlider } from '@/components/HeroSlider';
@@ -53,11 +53,15 @@ function pickRating(s: RawSubject): number | undefined {
 
 export default function HomePage() {
   const homepage = useWorkerHomepage();
+  const bottomTab = useWorkerBottomTab();
 
   // The worker /api/homepage returns a flat list of subjects (not sectioned).
   const all: RawSubject[] = Array.isArray(homepage.data?.data)
     ? (homepage.data!.data as RawSubject[])
     : [];
+
+  // Dynamic tabs from worker (bottomTabs + homeTabs per APK decompile for BottomTabType/HomeTabId)
+  const homeTabs = (bottomTab.data?.data?.homeTabs ?? []).slice(0, 6);
 
   const movies = all.filter(isMovie);
   const tvs = all.filter(isTv);
@@ -110,7 +114,19 @@ export default function HomePage() {
         {/* Home widget sections (continue watching etc.) */}
         <WidgetSection />
 
-        {/* Trending with category tabs */}
+        {/* Dynamic tabs from /api/bottom-tab (APK BottomTab/HomeTab + operate for sections/live) */}
+        {homeTabs.length > 0 && (
+          <section className="max-w-7xl mx-auto px-4 sm:px-6 -mt-2 mb-2">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {homeTabs.map((t: any, i: number) => (
+                <span key={i} className="chip text-[11px] whitespace-nowrap">{t.name || t.tabCode || 'Tab'}</span>
+              ))}
+              <span className="text-[10px] text-text-muted self-center ml-1"> (live/operate tabs)</span>
+            </div>
+          </section>
+        )}
+
+      {/* Trending with category tabs */}
         <section>
           <h2 className="font-display text-2xl tracking-wide mb-4">Trending</h2>
           <TrendingSection />
@@ -132,6 +148,8 @@ export default function HomePage() {
                   poster={pickPoster(s)}
                   rating={pickRating(s)}
                   year={s.releaseDate ? yearOf(s.releaseDate) : undefined}
+                  hasResource={(s as any).hasResource}
+                  corner={(s as any).corner}
                 />
               ))}
         </MediaRow>
@@ -148,6 +166,8 @@ export default function HomePage() {
                   poster={pickPoster(s)}
                   rating={pickRating(s)}
                   year={s.releaseDate ? yearOf(s.releaseDate) : undefined}
+                  hasResource={(s as any).hasResource}
+                  corner={(s as any).corner}
                 />
               ))}
         </MediaRow>
@@ -164,6 +184,8 @@ export default function HomePage() {
                   poster={pickPoster(s)}
                   rating={pickRating(s)}
                   year={s.releaseDate ? yearOf(s.releaseDate) : undefined}
+                  hasResource={(s as any).hasResource}
+                  corner={(s as any).corner}
                 />
               ))}
         </MediaRow>
